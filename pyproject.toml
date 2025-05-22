@@ -1,0 +1,25 @@
+[project]
+name = "trainspotter"
+version = "0.1.0"
+description = ""
+authors = [
+    {name = "momonala",email = "mnalavadi@gmail.com"}
+]
+readme = "README.md"
+dependencies = [
+]
+
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.black]
+line-length = 110
+target-version = ['py312']
+include = '\.py'
+
+[tool.poetry.dependencies]
+python = "3.12.*"
+Flask = "*"
+tabulate = "*"

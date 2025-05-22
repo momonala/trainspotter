@@ -1,0 +1,374 @@
+/* Base styles */
+body {
+    margin: 0;
+    padding: 0;
+    font-family: 'Fira Mono', Menlo, Monaco, monospace;
+    background: #f5f7fa;
+    color: #111;
+}
+
+/* Controls section */
+.top-controls {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    background: white;
+    padding: 0.5rem;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    z-index: 2;
+}
+
+.controls-row {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+.filter-select {
+    font-family: inherit;
+    font-size: 0.9rem;
+    padding: 0.4rem;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    background: white;
+    color: #111;
+    cursor: pointer;
+    flex: 1;
+    min-width: 0;
+    max-width: calc(50% - 0.25rem);
+}
+
+.time-info {
+    display: flex;
+    justify-content: center;
+    gap: 1rem;
+    font-size: 0.85rem;
+    color: #666;
+}
+
+.time-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.time-label {
+    color: #666;
+}
+
+.current-time, .update-info {
+    color: #111;
+}
+
+/* Toggle switch */
+.toggle-switch {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.9rem;
+}
+
+.toggle-slider {
+    width: 36px;
+    height: 20px;
+    background: #ccc;
+    border-radius: 20px;
+    position: relative;
+    cursor: pointer;
+}
+
+.toggle-slider:before {
+    content: "";
+    position: absolute;
+    width: 16px;
+    height: 16px;
+    background: white;
+    border-radius: 50%;
+    left: 2px;
+    top: 2px;
+    transition: 0.3s;
+}
+
+input:checked + .toggle-slider {
+    background: #2196F3;
+}
+
+input:checked + .toggle-slider:before {
+    transform: translateX(16px);
+}
+
+/* Station selector */
+.station-nav {
+    position: fixed;
+    top: 4.8rem;  /* Flush with controls */
+    left: 0;
+    right: 0;
+    background: #e8f4ff;
+    padding: 0.5rem 0.3rem;  /* Increased vertical padding */
+    border-bottom: 1px solid #d0e6ff;
+    z-index: 1;
+}
+
+.station-nav-list {
+    display: flex;
+    gap: 0.5rem;
+    overflow-x: auto;
+    list-style: none;
+    margin: 0;
+    padding: 0.2rem;
+}
+
+.station-nav-item {
+    padding: 0.4rem 0.8rem;
+    background: rgba(255, 255, 255, 0.5);
+    border-radius: 4px;
+    color: #666;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.station-nav-item:hover {
+    background: #d0e6ff;
+}
+
+.station-nav-item.active {
+    background: #2b6cb0;
+    color: white;
+}
+
+/* Timetable section */
+.stations-scroll {
+    display: flex;
+    overflow-x: auto;
+    margin-top: 7rem;  /* Increased to account for larger station nav */
+    min-height: calc(100vh - 7rem);
+    scroll-snap-type: x mandatory;  /* Add snap points */
+    -webkit-overflow-scrolling: touch;  /* Smooth scrolling on iOS */
+}
+
+.station-section {
+    flex: 1 0 50%;
+    min-width: 400px;
+    padding: 1.5rem 0.5rem;  /* Reduced horizontal padding, increased vertical */
+    background: white;
+    border-right: 1px solid #eee;
+    scroll-snap-align: start;  /* Snap to start of section */
+    scroll-snap-stop: always;  /* Force stopping at snap points */
+}
+
+/* Station header layout */
+.station-header-container {
+    display: flex;
+    align-items: baseline;
+    gap: 1rem;
+    margin: 0.5rem 0;
+}
+
+.station-header {
+    font-size: 1.0rem;
+    margin: 0;
+    font-weight: 500;
+}
+
+.station-walk-time {
+    color: #666;
+    margin: 0;
+    font-size: 0.9rem;
+}
+
+/* Table styles */
+.platform-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 0 0.01rem;
+    width: calc(100%);
+    table-layout: auto;
+}
+
+.platform-table th {
+    text-align: left;
+    padding: 0.5rem;
+    color: #666;
+    border-bottom: 2px solid #eee;
+}
+
+.platform-table td {
+    padding: 0.5rem;
+    border-bottom: 1px solid #eee;
+}
+
+/* Column widths */
+.platform-table th:nth-child(1),
+.platform-table td:nth-child(1) {
+    width: 2rem;  /* Transport logo */
+    padding: 0.5rem 0.3rem;
+    white-space: nowrap;
+}
+
+.platform-table th:nth-child(2),
+.platform-table td:nth-child(2) {
+    width: 3rem;  /* Line number */
+    padding-right: 0.3rem;
+    white-space: normal;  /* Allow wrapping */
+    word-break: break-word;
+}
+
+.platform-table th:nth-child(3),
+.platform-table td:nth-child(3) {
+    width: 1.5rem;  /* Direction arrow */
+    text-align: center;
+    padding: 0.5rem 0.2rem;
+    font-family: 'DejaVu Sans', sans-serif;
+    font-size: 1.2rem;
+    white-space: nowrap;
+}
+
+.platform-table th:nth-child(4),
+.platform-table td:nth-child(4) {
+    width: 3.5rem;  /* Time */
+    padding-right: 0.3rem;
+    white-space: nowrap;
+}
+
+.platform-table th:nth-child(5),
+.platform-table td:nth-child(5) {
+    width: 2.5rem;  /* Minutes */
+    padding-right: 0.3rem;
+    white-space: nowrap;
+}
+
+.platform-table th:nth-child(6),
+.platform-table td:nth-child(6) {
+    width: 2.5rem;  /* Wait time */
+    padding-right: 0.3rem;
+    white-space: nowrap;
+}
+
+.platform-table th:last-child,
+.platform-table td:last-child {
+    width: auto;  /* Direction - takes remaining space */
+    white-space: normal;  /* Allow wrapping */
+    word-break: break-word;
+    min-width: 8rem;  /* Ensure some minimum space for text */
+}
+
+/* Line badge styles */
+.line-badge {
+    padding: 0.2rem 0.4rem;
+    border-radius: 4px;
+    font-weight: 500;
+    color: white;
+    background: #444;
+    min-width: 2.5rem;
+    text-align: center;
+    display: inline-block;
+}
+
+/* Default color for buses, trams, etc */
+.line-badge {
+    background-color: #FFD800;
+    color: #111;
+}
+
+/* Transport logos */
+.transport-logo {
+    height: 1.2rem;
+    width: auto;
+    display: block;
+}
+
+/* Time-based colors */
+.time-red td { background-color: rgba(255, 0, 0, 0.1); }
+.time-yellow td { background-color: rgba(255, 200, 0, 0.1); }
+.time-green td { background-color: rgba(0, 255, 0, 0.1); }
+
+/* Utility classes */
+.negative-wait {
+    color: #e74c3c;
+}
+
+/* Refresh button */
+.refresh-button {
+    background: none;
+    border: none;
+    color: #2196F3;
+    font-size: 1.2rem;
+    cursor: pointer;
+    padding: 0.2rem;
+}
+
+.refresh-button:hover {
+    background: rgba(33, 150, 243, 0.1);
+    border-radius: 4px;
+}
+
+/* Line colors */
+.line-S1 { background-color: #DA6BA2; color: white; }
+.line-S2 { background-color: #007734; color: white; }
+.line-S25 { background-color: #007734; color: white; }
+.line-S26 { background-color: #007734; color: white; }
+.line-S3 { background-color: #0066AD; color: white; }
+.line-S41 { background-color: #AD5937; color: white; }
+.line-S42 { background-color: #CB6418; color: white; }
+.line-S45 { background-color: #CD9C53; color: white; }
+.line-S46 { background-color: #CD9C53; color: white; }
+.line-S47 { background-color: #CD9C53; color: white; }
+.line-S5 { background-color: #EB7405; color: white; }
+.line-S7 { background-color: #816DA6; color: white; }
+.line-S8 { background-color: #007734; color: white; }
+.line-S85 { background-color: #007734; color: white; }
+
+.line-U1 { background-color: #7DAD4C; color: white; }
+.line-U2 { background-color: #DA421E; color: white; }
+.line-U3 { background-color: #16683D; color: white; }
+.line-U4 { background-color: #F0D722; color: black; }
+.line-U5 { background-color: #7E5330; color: white; }
+.line-U6 { background-color: #8C6DAB; color: white; }
+.line-U7 { background-color: #009BD5; color: white; }
+.line-U8 { background-color: #224F86; color: white; }
+.line-U9 { background-color: #F3791D; color: white; }
+
+/* Mobile styles */
+@media (max-width: 768px) {
+    .top-controls {
+        padding: 0.5rem;
+    }
+
+    .controls-row {
+        flex-direction: column;
+        gap: 0.5rem;
+    }
+
+    .filters {
+        width: 100%;
+        justify-content: space-between;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+    }
+
+    .filter-select {
+        flex: 1;
+        min-width: 0;
+        max-width: calc(50% - 0.25rem);
+        font-size: 0.85rem;
+        padding: 0.3rem 0.5rem;
+    }
+
+    .time-info {
+        width: 100%;
+        justify-content: center;
+        font-size: 0.85rem;
+    }
+
+    .station-section {
+        min-width: 100vw;
+        scroll-snap-align: center;  /* Center alignment on mobile */
+    }
+}
