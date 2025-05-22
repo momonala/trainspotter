@@ -1,0 +1,18 @@
+{
+    "stations": {
+        "gesundbrunnen": {
+            "walk_time": 15
+        },
+        "bornholmer": {
+            "walk_time": 7
+        }
+    },
+    "walk_time_buffer": 2,
+    "location": {
+        "latitude": 52.552045,
+        "longitude": 13.399863
+    },
+    "update_interval_min": 30,
+    "min_departure_time_min": 5,
+    "gmaps_api_key": "AIzaSyCSPrhcNU66SnFzVbA9vYh7socHhLzDs-I"
+} 

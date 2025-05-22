@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trainspotter</title>
+    <link rel="icon" type="image/svg+xml" href="https://upload.wikimedia.org/wikipedia/commons/e/e7/S-Bahn-Logo.svg">
+    <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png">
+    <link rel="stylesheet" href="/static/styles.css">
+    <link href="https://fonts.googleapis.com/css2?family=Fira+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="top-controls">
+        <div class="controls-row">
+            <div class="filters">
+                <select id="transportFilter" class="filter-select">
+                    <option value="all">All Types</option>
+                    <option value="S-Bahn">S-Bahn</option>
+                    <option value="U-Bahn">U-Bahn</option>
+                    <option value="DB">ICE/Regional</option>
+                    <option value="Bus">Bus</option>
+                    <option value="Tram">Tram</option>
+                </select>
+                <select id="directionFilter" class="filter-select">
+                    <option value="all">All ⮂</option>
+                    <option value="↑">↑ North</option>
+                    <option value="↓">↓ South</option>
+                    <option value="→">→ East</option>
+                    <option value="←">← West</option>
+                    <option value="↻">↻ Clockwise</option>
+                    <option value="↺">↺ Counter-Clockwise</option>
+                </select>
+                <label class="toggle-switch">
+                    <input type="checkbox" id="walkTimeFilter" checked>
+                    <span class="toggle-slider"></span>
+                    <span class="toggle-label">only walkable</span>
+                </label>
+            </div>
+            <div class="time-info">
+                <div class="time-item">
+                    <span class="time-label">Current:</span>
+                    <span class="current-time"></span>
+                </div>
+                <div class="time-separator">|</div>
+                <div class="time-item">
+                    <span class="time-label">Updated:</span>
+                    <span class="update-info"></span>
+                </div>
+                <button id="refresh-button" class="refresh-button" title="Update location and refresh data">
+                    ↻
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <nav class="station-nav">
+        <ul id="station-nav-list" class="station-nav-list"></ul>
+    </nav>
+
+    <div id="stations-container" class="stations-scroll"></div>
+    <script>
+        // Get user's location when page loads
+        if ("geolocation" in navigator) {
+            navigator.geolocation.getCurrentPosition(
+                function(position) {
+                    // Send location to backend
+                    fetch('/api/location', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            latitude: position.coords.latitude,
+                            longitude: position.coords.longitude
+                        })
+                    });
+                },
+                function(error) {
+                    console.error("Error getting location:", error);
+                }
+            );
+        }
+    </script>
+    <script src="/static/app.js"></script>
+</body>
+</html> 
