@@ -73,6 +73,7 @@ body {
     align-items: center;
     gap: 0.5rem;
     font-size: 0.9rem;
+    cursor: pointer;
 }
 
 .toggle-slider {
@@ -96,11 +97,11 @@ body {
     transition: 0.3s;
 }
 
-input:checked + .toggle-slider {
+.toggle-switch.active .toggle-slider {
     background: #2196F3;
 }
 
-input:checked + .toggle-slider:before {
+.toggle-switch.active .toggle-slider:before {
     transform: translateX(16px);
 }
 
@@ -371,4 +372,4 @@ input:checked + .toggle-slider:before {
         min-width: 100vw;
         scroll-snap-align: center;  /* Center alignment on mobile */
     }
-}
+} 

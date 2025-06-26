@@ -406,6 +406,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     const transportFilter = document.getElementById('transportFilter');
     const directionFilter = document.getElementById('directionFilter');
     const walkTimeFilter = document.getElementById('walkTimeFilter');
+    let walkTimeEnabled = true; // Start with enabled
 
     transportFilter.addEventListener('change', () => {
         currentFilters.transport = transportFilter.value;
@@ -421,8 +422,10 @@ window.addEventListener('DOMContentLoaded', async () => {
         }
     });
 
-    walkTimeFilter.addEventListener('change', () => {
-        currentFilters.walkTimeEnabled = walkTimeFilter.checked;
+    walkTimeFilter.addEventListener('click', () => {
+        walkTimeEnabled = !walkTimeEnabled;
+        walkTimeFilter.classList.toggle('active', walkTimeEnabled);
+        currentFilters.walkTimeEnabled = walkTimeEnabled;
         if (lastData) {
             renderStations(lastData);
         }
