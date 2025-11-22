@@ -11,7 +11,7 @@ let globalConfig = null;
 let currentFilters = {
     transport: 'all',
     direction: 'all',
-    walkTimeEnabled: true
+    walkFilter: 'all'
 };
 
 async function fetchStations() {
@@ -34,28 +34,49 @@ async function fetchStations() {
     }
 }
 
-function formatLastUpdated() {
+// Track last update timestamp for relative "ago" display
+let lastUpdatedAt = null;
+
+function formatRelativeAgo(fromDate) {
+    if (!fromDate) return '';
     const now = new Date();
-    return now.toLocaleTimeString([], { 
-        hour: '2-digit', 
-        minute: '2-digit',
-        second: '2-digit'
-    });
+    let totalSeconds = Math.floor((now - fromDate) / 1000);
+    if (totalSeconds < 0) totalSeconds = 0;
+    const days = Math.floor(totalSeconds / 86400);
+    totalSeconds %= 86400;
+    const hours = Math.floor(totalSeconds / 3600);
+    totalSeconds %= 3600;
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    const pad2 = (n) => n.toString().padStart(2, '0');
+    if (days > 0) {
+        return `${days}d ${hours}:${pad2(minutes)}:${pad2(seconds)} ago`;
+    }
+    if (hours > 0) {
+        return `${hours}:${pad2(minutes)}:${pad2(seconds)} ago`;
+    }
+    if (minutes > 0) {
+        return `${minutes}:${pad2(seconds)} ago`;
+    }
+    return `${seconds}s ago`;
 }
 
-function formatCurrentTime() {
-    const now = new Date();
-    return now.toLocaleTimeString([], { 
-        hour: '2-digit', 
-        minute: '2-digit',
-        second: '2-digit'
-    });
-}
-
-function updateCurrentTime() {
-    const timeDisplay = document.querySelector('.current-time');
-    if (timeDisplay) {
-        timeDisplay.textContent = formatCurrentTime();
+function renderLastUpdated() {
+    const offsetEl = document.getElementById('last-updated-offset');
+    const timeEl = document.getElementById('last-updated-time');
+    if (timeEl) {
+        if (lastUpdatedAt) {
+            timeEl.textContent = lastUpdatedAt.toLocaleTimeString([], {
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit'
+            });
+        } else {
+            timeEl.textContent = '';
+        }
+    }
+    if (offsetEl) {
+        offsetEl.textContent = formatRelativeAgo(lastUpdatedAt);
     }
 }
 
@@ -136,7 +157,7 @@ function filterDeparture(departure, walkTime) {
     }
 
     // Walk time filter
-    if (currentFilters.walkTimeEnabled && walkTime !== null) {
+    if (currentFilters.walkFilter === 'walkable' && walkTime !== null) {
         const whenDate = new Date(departure.when);
         const minutesUntil = Math.floor((whenDate - new Date()) / (1000 * 60));
         const walkTimeBuffer = 4; // Buffer time before walk time
@@ -233,11 +254,8 @@ function renderStations(data) {
     container.innerHTML = '';
     navList.innerHTML = '';
 
-    // Update the timestamp in the dedicated container
-    const updateInfo = document.querySelector('.update-info');
-    if (updateInfo) {
-        updateInfo.textContent = formatLastUpdated();
-    }
+    // Update relative "Last Updated"
+    renderLastUpdated();
     
     // Create navigation items
     data.stations.forEach((station, idx) => {
@@ -378,11 +396,11 @@ window.addEventListener('DOMContentLoaded', async () => {
         
         refreshButton.classList.add('spinning');
         try {
-            // Update location first
-            await updateLocation();
-            // Then fetch new data
+            // Fetch new data with existing location on the server
             const data = await fetchStations();
             lastData = data;
+            lastUpdatedAt = new Date();
+            renderLastUpdated();
             renderStations(data);
             console.log('Refresh complete');
         } catch (error) {
@@ -398,15 +416,13 @@ window.addEventListener('DOMContentLoaded', async () => {
         refreshButton.addEventListener('click', refreshData);
     }
 
-    // Start updating current time
-    updateCurrentTime();
-    setInterval(updateCurrentTime, 1000);
+    // Start relative last-updated timer refresh
+    setInterval(renderLastUpdated, 1000);
 
     // Add filter handlers
     const transportFilter = document.getElementById('transportFilter');
     const directionFilter = document.getElementById('directionFilter');
-    const walkTimeFilter = document.getElementById('walkTimeFilter');
-    let walkTimeEnabled = true; // Start with enabled
+    const walkFilter = document.getElementById('walkFilter');
 
     transportFilter.addEventListener('change', () => {
         currentFilters.transport = transportFilter.value;
@@ -447,6 +463,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         try {
             const data = await fetchStations();
             lastData = data;
+            lastUpdatedAt = new Date();
             renderStations(data);
             console.log('Initial render complete');
             return true;
@@ -456,7 +473,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         }
     }
 
-    // Initial location update and data load
+    // Initial location update and data load (location only on full page load)
     await updateLocation();
     if (!await initialLoad()) {
         showError(`Error loading station data. Retrying in ${retryDelay/1000} seconds...<br>You can also refresh the page to try again.`);

@@ -7,6 +7,10 @@ body {
     color: #111;
 }
 
+:root {
+    --gutter: 0.75rem;
+}
+
 /* Controls section */
 .top-controls {
     position: fixed;
@@ -14,7 +18,7 @@ body {
     left: 0;
     right: 0;
     background: white;
-    padding: 0.5rem;
+    padding: 0.5rem var(--gutter);
     box-shadow: 0 1px 3px rgba(0,0,0,0.1);
     z-index: 2;
 }
@@ -47,7 +51,7 @@ body {
 
 .time-info {
     display: flex;
-    justify-content: center;
+    justify-content: flex-start;
     gap: 1rem;
     font-size: 0.85rem;
     color: #666;
@@ -60,10 +64,13 @@ body {
 }
 
 .time-label {
-    color: #666;
+    color: #111;
 }
 
-.current-time, .update-info {
+.time-offset {
+    color: #c62828; /* red */
+}
+.time-absolute {
     color: #111;
 }
 
@@ -112,7 +119,7 @@ body {
     left: 0;
     right: 0;
     background: #e8f4ff;
-    padding: 0.5rem 0.3rem;  /* Increased vertical padding */
+    padding: 0.5rem var(--gutter);  /* Increased vertical padding */
     border-bottom: 1px solid #d0e6ff;
     z-index: 1;
 }
@@ -123,7 +130,7 @@ body {
     overflow-x: auto;
     list-style: none;
     margin: 0;
-    padding: 0.2rem;
+    padding: 0.2rem 0;
 }
 
 .station-nav-item {
@@ -155,9 +162,9 @@ body {
 }
 
 .station-section {
-    flex: 1 0 50%;
-    min-width: 400px;
-    padding: 1.5rem 0.5rem;  /* Reduced horizontal padding, increased vertical */
+    flex: 0 0 100%;
+    min-width: 100vw;
+    padding: 1.5rem var(--gutter);  /* Unified horizontal gutter */
     background: white;
     border-right: 1px solid #eee;
     scroll-snap-align: start;  /* Snap to start of section */

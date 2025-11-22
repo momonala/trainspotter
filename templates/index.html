@@ -30,20 +30,16 @@
                     <option value="↻">↻ Clockwise</option>
                     <option value="↺">↺ Counter-Clockwise</option>
                 </select>
-                <div class="toggle-switch" id="walkTimeFilter">
-                    <span class="toggle-slider"></span>
-                    <span class="toggle-label">only walkable</span>
-                </div>
+                <select id="walkFilter" class="filter-select">
+                    <option value="all" selected>Ignore walk time</option>
+                    <option value="walkable">Only walkable</option>
+                </select>
             </div>
             <div class="time-info">
                 <div class="time-item">
-                    <span class="time-label">Current:</span>
-                    <span class="current-time"></span>
-                </div>
-                <div class="time-separator">|</div>
-                <div class="time-item">
-                    <span class="time-label">Updated:</span>
-                    <span class="update-info"></span>
+                    <span class="time-label">Last Updated:</span>
+                    <span class="time-absolute" id="last-updated-time"></span>
+                    <span class="time-offset" id="last-updated-offset"></span>
                 </div>
                 <button id="refresh-button" class="refresh-button" title="Update location and refresh data">
                     ↻
