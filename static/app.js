@@ -438,14 +438,15 @@ window.addEventListener('DOMContentLoaded', async () => {
         }
     });
 
-    walkTimeFilter.addEventListener('click', () => {
-        walkTimeEnabled = !walkTimeEnabled;
-        walkTimeFilter.classList.toggle('active', walkTimeEnabled);
-        currentFilters.walkTimeEnabled = walkTimeEnabled;
-        if (lastData) {
-            renderStations(lastData);
-        }
-    });
+    if (walkFilter) {
+        currentFilters.walkFilter = walkFilter.value;
+        walkFilter.addEventListener('change', () => {
+            currentFilters.walkFilter = walkFilter.value;
+            if (lastData) {
+                renderStations(lastData);
+            }
+        });
+    }
 
     // Function to show error message
     const showError = (message) => {

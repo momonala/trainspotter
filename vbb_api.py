@@ -32,7 +32,7 @@ session.mount("https://", adapter)
 TIMEOUT = 5
 
 
-@lru_cache(maxsize=256)
+@lru_cache(maxsize=512)
 def get_nearby_stations(coordinates: tuple[float, float] | None = None) -> list[Station]:
     """Get nearby stations that have S-Bahn service.
     Args:
