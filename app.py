@@ -26,7 +26,9 @@ browser_coordinates = None
 @app.route("/")
 def index():
     """Render the main page."""
-    return render_template("index.html")
+    # Add cache-busting version for static assets to avoid stale iOS caches
+    asset_version = int(datetime.now(timezone.utc).timestamp())
+    return render_template("index.html", asset_version=asset_version)
 
 
 @app.route("/api/location", methods=["POST"])

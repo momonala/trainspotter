@@ -163,7 +163,7 @@ body {
 
 .station-section {
     flex: 0 0 100%;
-    min-width: 100vw;
+    min-width: 100%;
     padding: 1.5rem var(--gutter);  /* Unified horizontal gutter */
     background: white;
     border-right: 1px solid #eee;
@@ -376,7 +376,7 @@ body {
     }
 
     .station-section {
-        min-width: 100vw;
+        min-width: 100%;
         scroll-snap-align: center;  /* Center alignment on mobile */
     }
-} 
+ } 
