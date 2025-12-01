@@ -3,16 +3,22 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Real-time Berlin public transport departures with walk-time awareness">
+    <meta name="theme-color" content="#2b6cb0">
     <title>Trainspotter</title>
     <link rel="icon" type="image/svg+xml" href="https://upload.wikimedia.org/wikipedia/commons/e/e7/S-Bahn-Logo.svg">
     <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="preload" href="/static/styles.css?v={{ asset_version }}" as="style">
     <link rel="stylesheet" href="/static/styles.css?v={{ asset_version }}">
     <link href="https://fonts.googleapis.com/css2?family=Fira+Mono:wght@400;500;700&display=swap" rel="stylesheet">
 </head>
 <body>
-    <div class="top-controls">
+    <header class="top-controls">
         <div class="controls-row">
-            <div class="filters">
+            <div class="filters" role="group" aria-label="Departure filters">
+                <label for="transportFilter" class="visually-hidden">Transport type</label>
                 <select id="transportFilter" class="filter-select">
                     <option value="all">All Types</option>
                     <option value="S-Bahn">S-Bahn</option>
@@ -21,6 +27,7 @@
                     <option value="Bus">Bus</option>
                     <option value="Tram">Tram</option>
                 </select>
+                <label for="directionFilter" class="visually-hidden">Direction</label>
                 <select id="directionFilter" class="filter-select">
                     <option value="all">All ⮂</option>
                     <option value="↑">↑ North</option>
@@ -30,6 +37,7 @@
                     <option value="↻">↻ Clockwise</option>
                     <option value="↺">↺ Counter-Clockwise</option>
                 </select>
+                <label for="walkFilter" class="visually-hidden">Walk time filter</label>
                 <select id="walkFilter" class="filter-select">
                     <option value="all" selected>Ignore walk time</option>
                     <option value="walkable">Only walkable</option>
@@ -38,44 +46,21 @@
             <div class="time-info">
                 <div class="time-item">
                     <span class="time-label">Last Updated:</span>
-                    <span class="time-absolute" id="last-updated-time"></span>
-                    <span class="time-offset" id="last-updated-offset"></span>
+                    <time class="time-absolute" id="last-updated-time"></time>
+                    <span class="time-offset" id="last-updated-offset" aria-live="polite"></span>
                 </div>
-                <button id="refresh-button" class="refresh-button" title="Update location and refresh data">
+                <button id="refresh-button" class="refresh-button" type="button" aria-label="Refresh departures">
                     ↻
                 </button>
             </div>
         </div>
-    </div>
+    </header>
 
-    <nav class="station-nav">
-        <ul id="station-nav-list" class="station-nav-list"></ul>
+    <nav class="station-nav" aria-label="Station navigation">
+        <ul id="station-nav-list" class="station-nav-list" role="tablist"></ul>
     </nav>
 
-    <div id="stations-container" class="stations-scroll"></div>
-    <script>
-        // Get user's location when page loads
-        if ("geolocation" in navigator) {
-            navigator.geolocation.getCurrentPosition(
-                function(position) {
-                    // Send location to backend
-                    fetch('/api/location', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                        },
-                        body: JSON.stringify({
-                            latitude: position.coords.latitude,
-                            longitude: position.coords.longitude
-                        })
-                    });
-                },
-                function(error) {
-                    console.error("Error getting location:", error);
-                }
-            );
-        }
-    </script>
+    <main id="stations-container" class="stations-scroll" role="tabpanel"></main>
     <script src="/static/app.js?v={{ asset_version }}"></script>
 </body>
 </html> 

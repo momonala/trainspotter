@@ -1,32 +1,64 @@
-// Cache transport logos
-const transportLogoCache = {};
+'use strict';
 
-// Cache line badges
-const lineBadgeCache = {};
+// =============================================================================
+// Constants
+// =============================================================================
 
-// Global config object to store station data
-let globalConfig = null;
-
-// Global state for filters
-let currentFilters = {
-    transport: 'all',
-    direction: 'all',
-    walkFilter: 'all'
+const CONFIG = {
+    FETCH_TIMEOUT_MS: 10000,
+    RETRY_DELAY_MS: 5000,
+    REFRESH_INTERVAL_MS: 30000,
+    LAST_UPDATED_INTERVAL_MS: 1000,
+    SCROLL_DEBOUNCE_MS: 50,
+    WALK_TIME_BUFFER_MIN: 4,
+    STATION_NAME_MAX_LENGTH: 20,
 };
 
-async function fetchStations() {
+const TRANSPORT_LOGOS = {
+    'S-Bahn': 'https://upload.wikimedia.org/wikipedia/commons/thumb/e/e7/S-Bahn-Logo.svg/2048px-S-Bahn-Logo.svg.png',
+    'U-Bahn': 'https://upload.wikimedia.org/wikipedia/commons/e/ee/U-Bahn_Berlin_logo.svg',
+    'Tram': 'https://upload.wikimedia.org/wikipedia/commons/a/a6/Tram-Logo.svg',
+    'Bus': 'https://upload.wikimedia.org/wikipedia/commons/thumb/8/83/BUS-Logo-BVG.svg/1024px-BUS-Logo-BVG.svg.png',
+    'DB': 'https://upload.wikimedia.org/wikipedia/commons/d/d5/Deutsche_Bahn_AG-Logo.svg',
+};
+
+// =============================================================================
+// State
+// =============================================================================
+
+const state = {
+    config: null,
+    lastData: null,
+    lastUpdatedAt: null,
+    filters: {
+        transport: 'all',
+        direction: 'all',
+        walkFilter: 'all'
+    }
+};
+
+// =============================================================================
+// Caches
+// =============================================================================
+
+const transportLogoCache = {};
+const lineBadgeCache = {};
+
+// =============================================================================
+// API Functions
+// =============================================================================
+
+async function fetchStations(refresh = false) {
     try {
-        console.log('Fetching station data...');
-        const resp = await fetch('/api/stations', {
-            // Add timeout using AbortController
-            signal: AbortSignal.timeout(10000)
+        const url = refresh ? '/api/stations?refresh=true' : '/api/stations';
+        const resp = await fetch(url, {
+            signal: AbortSignal.timeout(CONFIG.FETCH_TIMEOUT_MS)
         });
         if (!resp.ok) {
             throw new Error(`HTTP error! status: ${resp.status}`);
         }
         const data = await resp.json();
-        globalConfig = data.config; // Store global config
-        console.log('Successfully fetched station data');
+        state.config = data.config;
         return data;
     } catch (error) {
         console.error('Error fetching stations:', error);
@@ -34,58 +66,99 @@ async function fetchStations() {
     }
 }
 
-// Track last update timestamp for relative "ago" display
-let lastUpdatedAt = null;
+async function updateLocation() {
+    if (!('geolocation' in navigator)) return false;
+    
+    try {
+        const position = await new Promise((resolve, reject) => {
+            navigator.geolocation.getCurrentPosition(resolve, reject);
+        });
+        
+        await fetch('/api/location', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                latitude: position.coords.latitude,
+                longitude: position.coords.longitude
+            })
+        });
+        return true;
+    } catch (error) {
+        console.error('Error getting location:', error);
+        return false;
+    }
+}
+
+// =============================================================================
+// Formatting Helpers
+// =============================================================================
+
+function formatDistance(meters) {
+    if (meters < 1000) {
+        return `${meters}m`;
+    }
+    return `${(meters / 1000).toFixed(1)}km`;
+}
+
+// =============================================================================
+// Time Formatting
+// =============================================================================
 
 function formatRelativeAgo(fromDate) {
     if (!fromDate) return '';
     const now = new Date();
     let totalSeconds = Math.floor((now - fromDate) / 1000);
     if (totalSeconds < 0) totalSeconds = 0;
+    
     const days = Math.floor(totalSeconds / 86400);
     totalSeconds %= 86400;
     const hours = Math.floor(totalSeconds / 3600);
     totalSeconds %= 3600;
     const minutes = Math.floor(totalSeconds / 60);
     const seconds = totalSeconds % 60;
-    const pad2 = (n) => n.toString().padStart(2, '0');
-    if (days > 0) {
-        return `${days}d ${hours}:${pad2(minutes)}:${pad2(seconds)} ago`;
-    }
-    if (hours > 0) {
-        return `${hours}:${pad2(minutes)}:${pad2(seconds)} ago`;
-    }
-    if (minutes > 0) {
-        return `${minutes}:${pad2(seconds)} ago`;
-    }
+    
+    const pad = (n) => n.toString().padStart(2, '0');
+    
+    if (days > 0) return `${days}d ${hours}:${pad(minutes)}:${pad(seconds)} ago`;
+    if (hours > 0) return `${hours}:${pad(minutes)}:${pad(seconds)} ago`;
+    if (minutes > 0) return `${minutes}:${pad(seconds)} ago`;
     return `${seconds}s ago`;
 }
 
 function renderLastUpdated() {
     const offsetEl = document.getElementById('last-updated-offset');
     const timeEl = document.getElementById('last-updated-time');
+    
     if (timeEl) {
-        if (lastUpdatedAt) {
-            timeEl.textContent = lastUpdatedAt.toLocaleTimeString([], {
-                hour: '2-digit',
-                minute: '2-digit',
-                second: '2-digit'
-            });
-        } else {
-            timeEl.textContent = '';
-        }
+        timeEl.textContent = state.lastUpdatedAt 
+            ? state.lastUpdatedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+            : '';
     }
     if (offsetEl) {
-        offsetEl.textContent = formatRelativeAgo(lastUpdatedAt);
+        offsetEl.textContent = formatRelativeAgo(state.lastUpdatedAt);
     }
 }
 
-function formatTime(when) {
-    const date = new Date(when);
-    const now = new Date();
-    const diffMins = Math.round((date - now) / 60000);
-    const hhmm = date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
-    return `${hhmm} (${diffMins}m)`;
+// =============================================================================
+// UI Helpers
+// =============================================================================
+
+function triggerRowAnimation() {
+    // Add animation class to all table rows for split-flap flip effect
+    const rows = document.querySelectorAll('.platform-table tbody tr');
+    rows.forEach(row => {
+        // Remove class first to reset animation if already present
+        row.classList.remove('row-updated');
+        // Force reflow to restart animation
+        void row.offsetWidth;
+        row.classList.add('row-updated');
+    });
+    
+    // Remove animation class after all flips complete (to allow re-triggering)
+    // Max delay is 750ms + 400ms animation = ~1150ms
+    setTimeout(() => {
+        rows.forEach(row => row.classList.remove('row-updated'));
+    }, 1500);
 }
 
 function getTimeClass(minutesUntil, timeConfig) {
@@ -114,31 +187,13 @@ function createLineBadge(line) {
 }
 
 function createTransportLogo(type) {
-    // Use cached logo if available
     if (transportLogoCache[type]) {
         return transportLogoCache[type].cloneNode(true);
     }
 
     const img = document.createElement('img');
     img.className = 'transport-logo';
-    
-    switch(type) {
-        case 'S-Bahn':
-            img.src = 'https://upload.wikimedia.org/wikipedia/commons/thumb/e/e7/S-Bahn-Logo.svg/2048px-S-Bahn-Logo.svg.png';
-            break;
-        case 'U-Bahn':
-            img.src = 'https://upload.wikimedia.org/wikipedia/commons/e/ee/U-Bahn_Berlin_logo.svg';
-            break;
-        case 'Tram':
-            img.src = 'https://upload.wikimedia.org/wikipedia/commons/a/a6/Tram-Logo.svg';
-            break;
-        case 'Bus':
-            img.src = 'https://upload.wikimedia.org/wikipedia/commons/thumb/8/83/BUS-Logo-BVG.svg/1024px-BUS-Logo-BVG.svg.png';
-            break;
-        case 'DB':
-            img.src = 'https://upload.wikimedia.org/wikipedia/commons/d/d5/Deutsche_Bahn_AG-Logo.svg';
-            break;
-    }
+    img.src = TRANSPORT_LOGOS[type] || '';
     img.alt = type;
     
     transportLogoCache[type] = img;
@@ -146,43 +201,46 @@ function createTransportLogo(type) {
 }
 
 function filterDeparture(departure, walkTime) {
-    // Transport type filter
-    if (currentFilters.transport !== 'all' && departure.transport_type !== currentFilters.transport) {
+    const { transport, direction, walkFilter } = state.filters;
+    
+    if (transport !== 'all' && departure.transport_type !== transport) {
         return false;
     }
     
-    // Direction filter
-    if (currentFilters.direction !== 'all' && departure.direction_symbol !== currentFilters.direction) {
+    if (direction !== 'all' && departure.direction_symbol !== direction) {
         return false;
     }
 
-    // Walk time filter
-    if (currentFilters.walkFilter === 'walkable' && walkTime !== null) {
-        const whenDate = new Date(departure.when);
-        const minutesUntil = Math.floor((whenDate - new Date()) / (1000 * 60));
-        const walkTimeBuffer = 4; // Buffer time before walk time
-        const minTimeNeeded = walkTime - walkTimeBuffer;
-        
-        // Filter out trains that don't give enough time to walk there
-        // i.e., keep only trains where we have enough time to walk there
+    if (walkFilter === 'walkable' && walkTime != null) {
+        const minutesUntil = Math.floor((new Date(departure.when) - new Date()) / 60000);
+        const minTimeNeeded = walkTime - CONFIG.WALK_TIME_BUFFER_MIN;
         return minutesUntil > minTimeNeeded;
     }
     
     return true;
 }
 
+// =============================================================================
+// Table Rendering
+// =============================================================================
+
 function createStationTable(departures, timeConfig, walkTime) {
     const table = document.createElement('table');
     table.className = 'platform-table';
+    
+    // Header
     const thead = document.createElement('thead');
     const headerRow = document.createElement('tr');
     ['', 'Line', '', 'Time', 'In', 'Wait', 'Direction'].forEach(col => {
         const th = document.createElement('th');
         th.textContent = col;
+        if (col) th.scope = 'col';
         headerRow.appendChild(th);
     });
     thead.appendChild(headerRow);
     table.appendChild(thead);
+    
+    // Body
     const tbody = document.createElement('tbody');
 
     // Filter departures based on user filters
@@ -238,8 +296,16 @@ function createStationTable(departures, timeConfig, walkTime) {
     return table;
 }
 
+// =============================================================================
+// Station Rendering
+// =============================================================================
+
+// Store references to avoid adding duplicate event listeners
+let scrollHandler = null;
+let resizeHandler = null;
+
 function renderStations(data) {
-    if (!data || !data.stations || !Array.isArray(data.stations)) {
+    if (!data?.stations?.length) {
         console.error('Invalid station data:', data);
         return;
     }
@@ -251,33 +317,37 @@ function renderStations(data) {
         return;
     }
     
+    // Clean up previous event listeners to prevent memory leak
+    if (scrollHandler) container.removeEventListener('scroll', scrollHandler);
+    if (resizeHandler) window.removeEventListener('resize', resizeHandler);
+    
     container.innerHTML = '';
     navList.innerHTML = '';
 
-    // Update relative "Last Updated"
     renderLastUpdated();
     
     // Create navigation items
     data.stations.forEach((station, idx) => {
         const navItem = document.createElement('li');
         navItem.className = 'station-nav-item';
+        navItem.setAttribute('role', 'tab');
+        navItem.setAttribute('aria-selected', idx === 0 ? 'true' : 'false');
         if (idx === 0) navItem.classList.add('active');
         
-        const truncatedName = station.name.length > 20 ? `${station.name.slice(0, 20)}...` : station.name;
-        navItem.textContent = truncatedName;
+        const maxLen = CONFIG.STATION_NAME_MAX_LENGTH;
+        navItem.textContent = station.name.length > maxLen 
+            ? `${station.name.slice(0, maxLen)}...` 
+            : station.name;
         
         navItem.addEventListener('click', () => {
-            // Update active state
-            document.querySelectorAll('.station-nav-item').forEach(item => item.classList.remove('active'));
-            navItem.classList.add('active');
+            document.querySelectorAll('.station-nav-item').forEach((item, i) => {
+                item.classList.toggle('active', item === navItem);
+                item.setAttribute('aria-selected', item === navItem ? 'true' : 'false');
+            });
             
-            // Scroll to station without scrolling to top
             const stationElement = document.querySelector(`[data-station-id="${idx}"]`);
             if (stationElement) {
-                container.scrollTo({
-                    left: stationElement.offsetLeft,
-                    behavior: 'smooth'
-                });
+                container.scrollTo({ left: stationElement.offsetLeft, behavior: 'smooth' });
             }
         });
         
@@ -294,18 +364,18 @@ function renderStations(data) {
         const headerContainer = document.createElement('div');
         headerContainer.className = 'station-header-container';
         
-        // // Add station name
-        // const header = document.createElement('h2');
-        // header.className = 'station-header';
-        // header.textContent = station.name;
-        // headerContainer.appendChild(header);
-
+        // Add station name
+        const stationName = document.createElement('h2');
+        stationName.className = 'station-header';
+        stationName.textContent = station.name;
+        headerContainer.appendChild(stationName);
+        
         // Add walk time if available
-        if (station.walkTime !== null && station.walkTime !== undefined) {
-            const walkTime = document.createElement('div');
-            walkTime.className = 'station-walk-time';
-            walkTime.textContent = `${station.walkTime} minute walk`;
-            headerContainer.appendChild(walkTime);
+        if (station.walkTime != null) {
+            const walkTimeEl = document.createElement('div');
+            walkTimeEl.className = 'station-walk-time';
+            walkTimeEl.textContent = `${station.walkTime} min walk · ${formatDistance(station.distance)} away`;
+            headerContainer.appendChild(walkTimeEl);
         }
 
         section.appendChild(headerContainer);
@@ -317,15 +387,14 @@ function renderStations(data) {
         container.appendChild(section);
     });
 
-    // Add scroll listener to update active nav item
+    // Update active station based on scroll position
     const updateActiveStation = () => {
         const sections = document.querySelectorAll('.station-section');
         let activeSection = null;
         let minDistance = Infinity;
         
         sections.forEach(section => {
-            const rect = section.getBoundingClientRect();
-            const distance = Math.abs(rect.left);
+            const distance = Math.abs(section.getBoundingClientRect().left);
             if (distance < minDistance) {
                 minDistance = distance;
                 activeSection = section;
@@ -333,140 +402,72 @@ function renderStations(data) {
         });
 
         if (activeSection) {
-            const idx = activeSection.dataset.stationId;
+            const idx = parseInt(activeSection.dataset.stationId, 10);
             document.querySelectorAll('.station-nav-item').forEach((item, i) => {
-                item.classList.toggle('active', i === parseInt(idx));
+                const isActive = i === idx;
+                item.classList.toggle('active', isActive);
+                item.setAttribute('aria-selected', isActive ? 'true' : 'false');
             });
         }
     };
 
-    // Update active station on scroll
+    // Create debounced scroll handler
     let scrollTimeout;
-    container.addEventListener('scroll', () => {
+    scrollHandler = () => {
         clearTimeout(scrollTimeout);
-        scrollTimeout = setTimeout(updateActiveStation, 50);  // Debounce the scroll event
-    });
-
-    // Also update on any resize events
-    window.addEventListener('resize', updateActiveStation);
-
-    // Initial update
+        scrollTimeout = setTimeout(updateActiveStation, CONFIG.SCROLL_DEBOUNCE_MS);
+    };
+    resizeHandler = updateActiveStation;
+    
+    container.addEventListener('scroll', scrollHandler);
+    window.addEventListener('resize', resizeHandler);
+    
     updateActiveStation();
 }
 
-// Initialize the app
+// =============================================================================
+// Initialization
+// =============================================================================
+
+function showError(container, message) {
+    if (container) {
+        container.innerHTML = `<div class="error-message" role="alert">${message}</div>`;
+    }
+}
+
 window.addEventListener('DOMContentLoaded', async () => {
-    console.log('Page loaded, initializing station data...');
-    const retryDelay = 5000;  // 5 second retry for initial load
-    const refreshInterval = 30000;  // 30 second refresh interval
-    let lastData = null;
     const container = document.getElementById('stations-container');
     const refreshButton = document.getElementById('refresh-button');
 
-    // Function to get and send location
-    async function updateLocation() {
-        if ("geolocation" in navigator) {
-            try {
-                const position = await new Promise((resolve, reject) => {
-                    navigator.geolocation.getCurrentPosition(resolve, reject);
-                });
-                
-                await fetch('/api/location', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        latitude: position.coords.latitude,
-                        longitude: position.coords.longitude
-                    })
-                });
-                return true;
-            } catch (error) {
-                console.error("Error getting location:", error);
-                return false;
-            }
-        }
-        return false;
-    }
-
-    // Function to refresh data with visual feedback
-    async function refreshData() {
+    async function refreshData(forceRefreshStations = false) {
         if (!refreshButton) return;
         
         refreshButton.classList.add('spinning');
         try {
-            // Fetch new data with existing location on the server
-            const data = await fetchStations();
-            lastData = data;
-            lastUpdatedAt = new Date();
+            // Pass refresh flag to control station list refresh
+            const data = await fetchStations(forceRefreshStations);
+            state.lastData = data;
+            state.lastUpdatedAt = new Date();
             renderLastUpdated();
             renderStations(data);
-            console.log('Refresh complete');
+            
+            // Trigger row sweep animation after render
+            triggerRowAnimation();
         } catch (error) {
             console.error('Error during refresh:', error);
-            showError('Error updating data. Please try again.');
+            showError(container, 'Error updating data. Please try again.');
         } finally {
             refreshButton.classList.remove('spinning');
         }
     }
 
-    // Add click handler for refresh button
-    if (refreshButton) {
-        refreshButton.addEventListener('click', refreshData);
-    }
-
-    // Start relative last-updated timer refresh
-    setInterval(renderLastUpdated, 1000);
-
-    // Add filter handlers
-    const transportFilter = document.getElementById('transportFilter');
-    const directionFilter = document.getElementById('directionFilter');
-    const walkFilter = document.getElementById('walkFilter');
-
-    transportFilter.addEventListener('change', () => {
-        currentFilters.transport = transportFilter.value;
-        if (lastData) {
-            renderStations(lastData);
-        }
-    });
-
-    directionFilter.addEventListener('change', () => {
-        currentFilters.direction = directionFilter.value;
-        if (lastData) {
-            renderStations(lastData);
-        }
-    });
-
-    if (walkFilter) {
-        currentFilters.walkFilter = walkFilter.value;
-        walkFilter.addEventListener('change', () => {
-            currentFilters.walkFilter = walkFilter.value;
-            if (lastData) {
-                renderStations(lastData);
-            }
-        });
-    }
-
-    // Function to show error message
-    const showError = (message) => {
-        if (container) {
-            container.innerHTML = `
-                <div class="error-message">
-                    ${message}
-                </div>
-            `;
-        }
-    };
-
-    // Initial load with one retry
     async function initialLoad() {
         try {
-            const data = await fetchStations();
-            lastData = data;
-            lastUpdatedAt = new Date();
+            // Initial page load refreshes stations
+            const data = await fetchStations(true);
+            state.lastData = data;
+            state.lastUpdatedAt = new Date();
             renderStations(data);
-            console.log('Initial render complete');
             return true;
         } catch (error) {
             console.error('Error during initial load:', error);
@@ -474,27 +475,55 @@ window.addEventListener('DOMContentLoaded', async () => {
         }
     }
 
-    // Initial location update and data load (location only on full page load)
+    // Set up refresh button - force refresh stations on manual click
+    if (refreshButton) {
+        refreshButton.addEventListener('click', () => refreshData(true));
+    }
+
+    // Update "last updated" display every second
+    setInterval(renderLastUpdated, CONFIG.LAST_UPDATED_INTERVAL_MS);
+
+    // Set up filter handlers
+    const filterConfig = [
+        { id: 'transportFilter', key: 'transport' },
+        { id: 'directionFilter', key: 'direction' },
+        { id: 'walkFilter', key: 'walkFilter' }
+    ];
+    
+    filterConfig.forEach(({ id, key }) => {
+        const el = document.getElementById(id);
+        if (el) {
+            state.filters[key] = el.value;
+            el.addEventListener('change', () => {
+                state.filters[key] = el.value;
+                if (state.lastData) renderStations(state.lastData);
+            });
+        }
+    });
+
+    // Initial load
     await updateLocation();
+    
     if (!await initialLoad()) {
-        showError(`Error loading station data. Retrying in ${retryDelay/1000} seconds...<br>You can also refresh the page to try again.`);
+        const retrySec = CONFIG.RETRY_DELAY_MS / 1000;
+        showError(container, `Error loading station data. Retrying in ${retrySec} seconds...<br>You can also refresh the page to try again.`);
         
-        // Try one more time after delay
         setTimeout(async () => {
             if (!await initialLoad()) {
-                showError(`
+                const refreshSec = CONFIG.REFRESH_INTERVAL_MS / 1000;
+                showError(container, `
                     Unable to load station data.<br>
-                    Will automatically try again in ${refreshInterval/1000} seconds.<br>
+                    Will automatically try again in ${refreshSec} seconds.<br>
                     You can also use the refresh button to try again immediately.
                 `);
             }
-        }, retryDelay);
+        }, CONFIG.RETRY_DELAY_MS);
     }
 
-    // Set up automatic refresh interval
-    const updateInterval = setInterval(refreshData, refreshInterval);
+    // Auto-refresh interval (don't refresh station list, only departures)
+    const updateInterval = setInterval(() => refreshData(false), CONFIG.REFRESH_INTERVAL_MS);
     
     window.addEventListener('unload', () => {
-        if (updateInterval) clearInterval(updateInterval);
+        clearInterval(updateInterval);
     });
 }); 

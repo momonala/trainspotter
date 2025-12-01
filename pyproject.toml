@@ -1,25 +1,43 @@
 [project]
 name = "trainspotter"
 version = "0.1.0"
-description = ""
+description = "Real-time Berlin public transport departures with walk-time awareness"
 authors = [
-    {name = "momonala",email = "mnalavadi@gmail.com"}
+    {name = "momonala", email = "mnalavadi@gmail.com"}
 ]
 readme = "README.md"
+requires-python = ">=3.12"
 dependencies = [
+    "flask>=3.0",
+    "requests>=2.31",
+    "urllib3>=2.0",
+    "googlemaps>=4.10",
+    "numpy>=1.26",
+    "tabulate>=0.9",
+    "joblib==1.*",
 ]
-
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
 build-backend = "poetry.core.masonry.api"
 
+[tool.isort]
+force_single_line = true
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
 [tool.black]
-line-length = 110
+line-length = 120
 target-version = ['py312']
 include = '\.py'
 
 [tool.poetry.dependencies]
-python = "3.12.*"
-Flask = "*"
-tabulate = "*"
+python = ">=3.12"
+flask = ">=3.0"
+requests = ">=2.31"
+urllib3 = ">=2.0"
+googlemaps = ">=4.10"
+numpy = ">=1.26"
+tabulate = ">=0.9"

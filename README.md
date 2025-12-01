@@ -1,98 +1,230 @@
-# 🚉 Trainspotter
+# Trainspotter
 
-A real-time Berlin public transport dashboard showing upcoming departures closest to my apartment.
+Real-time Berlin public transport departure board with walk-time-aware color coding.
 
-## Features
+## Tech Stack
 
-- 🚆 Real-time departure information for S-Bahn, U-Bahn, Bus, and Tram
-- 🚶‍♂️ Walking time indicators (default: 15 min to Gesundbrunnen, 5 min to Bornholmer)
-- 🎨 Official BVG/S-Bahn Berlin transport logos and line colors
-- 🎯 Time-based highlighting:
-  - 🔴 Red: Not enough time to catch train
-  - 🟡 Yellow: Tight timing but possible
-  - 🟢 Green: Comfortable timing
+Python 3.12, Flask, VBB Transport REST API, Google Maps Directions API, Vanilla JS frontend
 
-### Time Thresholds
+## Architecture
 
-Ex.
-#### Bornholmer Straße (5 min walk)
-- Red: < 3 minutes until departure
-- Yellow: 3-7 minutes
-- Green: > 7 minutes
+```mermaid
+flowchart LR
+    subgraph External
+        VBB[VBB API<br/>v6.vbb.transport.rest]
+        GMaps[Google Maps<br/>Directions API]
+        Browser[Browser<br/>Geolocation]
+    end
+    
+    subgraph App
+        Flask[Flask :5007]
+        Cache[LRU Cache]
+    end
+    
+    subgraph Frontend
+        HTML[index.html]
+        JS[app.js]
+    end
 
-#### Gesundbrunnen (15 min walk)
-- Red: < 13 minutes until departure
-- Yellow: 13-17 minutes
-- Green: > 17 minutes
-
-## Setup
-
-1. Install Poetry (if not already installed):
-```bash
-curl -sSL https://install.python-poetry.org | python3 -
+    VBB -->|stations, departures| Cache
+    GMaps -->|walk times| Cache
+    Cache --> Flask
+    Browser -->|coordinates| Flask
+    Flask -->|JSON| JS
+    JS --> HTML
 ```
 
-2. Install dependencies:
-```bash
-poetry install
-```
+## Prerequisites
 
-3. Run the Flask application:
+- Python 3.12+
+- Poetry
+- Google Maps API key (for dynamic walk time calculation)
+
+## Installation
+
+1. Install dependencies:
+   ```bash
+   poetry install
+   ```
+
+2. Configure `config.json`:
+   ```json
+   {
+       "stations": {
+           "gesundbrunnen": {
+               "walk_time": 15
+           }
+       },
+       "walk_time_buffer": 2,
+       "location": {
+           "latitude": 52.552045,
+           "longitude": 13.399863
+       },
+       "update_interval_min": 30,
+       "min_departure_time_min": 5,
+       "gmaps_api_key": "YOUR_API_KEY"
+   }
+   ```
+
+   | Field | Required | Description |
+   |-------|----------|-------------|
+   | `stations.<name>.walk_time` | No | Preconfigured walk time in minutes (overrides Google Maps) |
+   | `walk_time_buffer` | Yes | Buffer ± minutes for yellow threshold zone |
+   | `location.latitude/longitude` | Yes | Default coordinates (fallback if browser geolocation unavailable) |
+   | `update_interval_min` | Yes | Departure fetch window in minutes |
+   | `min_departure_time_min` | Yes | Minimum time until departure to display |
+   | `gmaps_api_key` | Yes | Google Maps API key for walk time calculations |
+
+## Running
+
 ```bash
 python app.py
 ```
 
-4. Open in your browser:
-```
-http://localhost:5007
-```
+Web UI: http://localhost:5007
 
-### Terminal View
-
-You can also view departures directly in your terminal:
+Terminal view (no server):
 ```bash
 python trainspotter.py
 ```
 
-This provides a compact, color-coded view with:
-- 🔴 Red: Not enough time to catch train
-- 🟡 Yellow: Tight timing but possible
-- 🟢 Green: Comfortable timing based on your walk time
+## Project Structure
 
-## Configuration
+```
+trainspotter/
+├── app.py                  # Flask server, API endpoints
+├── trainspotter.py         # CLI terminal view (standalone)
+├── vbb_api.py              # VBB API client, station/departure fetching
+├── utils.py                # Walk time, thresholds, bearing calculations
+├── datamodels.py           # Dataclasses: Station, Departure, Line, etc.
+├── config.json             # User configuration
+├── static/
+│   ├── app.js              # Frontend logic, rendering, filters
+│   └── styles.css          # Styling with BVG/VBB line colors
+├── templates/
+│   └── index.html          # Main page template
+└── install/
+    ├── install.sh          # Raspberry Pi deployment script
+    └── projects_trainspotter.service  # systemd unit file
+```
 
-The application is configured through `config.json`. You'll need to update this file with your specific location and stations:
+## API Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/` | GET | Main dashboard page |
+| `/api/location` | POST | Receive browser geolocation `{latitude, longitude}` |
+| `/api/stations` | GET | Returns nearby stations with departures |
+
+### `GET /api/stations` Response
 
 ```json
 {
-    "stations": {
-        "station_name": {
-            "walk_time": 15,  # Minutes to walk to this station
-            "hidden_platforms": {  # Optional: platforms to hide
-                "S-Bahn": ["1", "4"]
-            }
+  "stations": [
+    {
+      "name": "S Gesundbrunnen",
+      "distance": 450,
+      "walkTime": 15,
+      "departures": [
+        {
+          "transport_type": "S-Bahn",
+          "line": "S41",
+          "when": "2025-01-01T12:30:00+01:00",
+          "direction_symbol": "↻",
+          "provenance": "Ringbahn",
+          "wait_time": 8
         }
-    },
-    "location": {
-        "latitude": 52.552045,  # Your location coordinates
-        "longitude": 13.399863
-    },
-    "update_interval_min": 30  # How often to fetch new data
+      ],
+      "timeConfig": {
+        "buffer": 13,
+        "yellowThreshold": 17
+      }
+    }
+  ],
+  "config": { ... }
 }
 ```
 
+## Key Concepts
 
-## Technical Details
+| Concept | Description |
+|---------|-------------|
+| `walk_time` | Minutes to walk from user location to station |
+| `wait_time` | `minutes_until_departure - walk_time`. Negative = can't make it |
+| `buffer` / `red_threshold` | `walk_time - walk_time_buffer`. Below this = red (miss train) |
+| `yellow_threshold` | `walk_time + walk_time_buffer`. Between red and yellow = tight timing |
+| `direction_symbol` | Cardinal arrow (↑↓←→) or ring direction (↻↺ for S41/S42) |
+| `transport_type` | Normalized: `S-Bahn`, `U-Bahn`, `Tram`, `Bus`, `DB` |
+| `provenance` | Cleaned destination name (strips "Hauptbahnhof" → "HBF", etc.) |
 
-### Backend
-- Flask web server
-- Real-time data fetching from VBB API
+### Color Thresholds
 
-### Frontend
-- Auto-updates every 30 seconds
-- Official transport logos from wikipedia
-- Uses official VBB colors for all transport lines [S-Bahn](https://en.wikipedia.org/wiki/Module:Adjacent_stations/Berlin_S-Bahn), [U-Bahn](https://en.wikipedia.org/wiki/Module:Adjacent_stations/Berlin_U-Bahn)
+For a station with `walk_time=15` and `buffer=2`:
+- 🔴 Red: < 13 min (can't make it)
+- 🟡 Yellow: 13-17 min (tight)
+- 🟢 Green: > 17 min (comfortable)
+
+## Data Models
+
+```
+Station
+├── id: str
+├── name: str
+├── location: Location (lat/long)
+├── products: Products (suburban, subway, tram, bus, ferry, express, regional)
+└── distance: int (meters from user)
+
+Departure
+├── tripId: str
+├── stop: Station
+├── when: datetime
+├── delay: int | None
+├── platform: str | None
+├── line: Line
+│   ├── name: str (e.g., "S41")
+│   ├── product: str (e.g., "suburban")
+│   └── color: Color (fg, bg)
+├── destination: Station
+└── provenance: str
+```
+
+## External API Dependencies
+
+### VBB Transport REST API
+- Base: `https://v6.vbb.transport.rest`
+- Endpoints used:
+  - `/locations/nearby` - Find stations near coordinates
+  - `/stops/{id}/departures` - Get departures for a station
+- No auth required
+- Unofficial API, no SLA
+
+### Google Maps Directions API
+- Used for walk time calculation when station not in config
+- Requires API key with Directions API enabled
+- Results cached via `@lru_cache`
+
+## Deployment
+
+### systemd (Raspberry Pi)
+
+```bash
+./install/install.sh
+```
+
+This script:
+1. Creates conda environment `trainspotter`
+2. Installs Poetry dependencies
+3. Installs systemd service
+4. Configures Cloudflare tunnel (optional)
+
+Service file: `install/projects_trainspotter.service`
+
+```bash
+sudo systemctl status projects_trainspotter
+sudo systemctl restart projects_trainspotter
+journalctl -u projects_trainspotter -f
+```
 
 ## License
 
-MIT License - feel free to use and modify as needed!
+MIT

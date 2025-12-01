@@ -1,10 +1,10 @@
 import json
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime
 from functools import lru_cache
-from typing import Any
 
 import requests
+from joblib import Memory
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
@@ -12,6 +12,7 @@ from datamodels import Departure, Station, parse_departures, parse_stations
 
 logger = logging.getLogger(__name__)
 
+disk_cache = Memory(".cache", verbose=0)
 
 # Load configuration
 with open("config.json", "r") as f:
@@ -32,7 +33,7 @@ session.mount("https://", adapter)
 TIMEOUT = 5
 
 
-@lru_cache(maxsize=512)
+@disk_cache.cache
 def get_nearby_stations(coordinates: tuple[float, float] | None = None) -> list[Station]:
     """Get nearby stations that have S-Bahn service.
     Args:
@@ -43,9 +44,7 @@ def get_nearby_stations(coordinates: tuple[float, float] | None = None) -> list[
         logger.info(f"Using provided coordinates: {coordinates}")
     else:
         coordinates = (config["location"]["latitude"], config["location"]["longitude"])
-        logger.info(
-            f"Using config coordinates: {config['location']['latitude']}, {config['location']['longitude']}"
-        )
+        logger.info(f"Using config coordinates: {config['location']['latitude']}, {config['location']['longitude']}")
     lat, long = coordinates
     try:
         location_resp = session.get(
@@ -68,7 +67,7 @@ def get_nearby_stations(coordinates: tuple[float, float] | None = None) -> list[
 def get_inbound_trains_cached(station_id: str, timestamp: str) -> list[Departure]:
     """Cached version of get_inbound_trains."""
     try:
-        logger.info(f"🔦 Fetching departures for station {station_id}...")
+        logger.debug(f"🔦 Fetching departures for station {station_id}...")
         departures_resp = session.get(
             f"https://v6.vbb.transport.rest/stops/{station_id}/departures",
             params={
@@ -82,7 +81,7 @@ def get_inbound_trains_cached(station_id: str, timestamp: str) -> list[Departure
         departures_resp.raise_for_status()
         departures_data = departures_resp.json()
         parsed_departures = parse_departures(departures_data)
-        logger.info(f"👀 Found {len(parsed_departures)} departures for station {station_id}")
+        logger.debug(f"👀 Found {len(parsed_departures)} departures for station {station_id}")
         return parsed_departures
 
     except requests.RequestException as e:

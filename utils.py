@@ -1,29 +1,33 @@
 """Shared utility functions for trainspotter."""
 
 import json
-import math
-from functools import lru_cache
 import logging
+import math
 
 import googlemaps
+import numpy as np
+from joblib import Memory
 
 from datamodels import Departure, Station
-import numpy as np
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+disk_cache = Memory(".cache", verbose=0)
 
 with open("config.json", "r") as f:
     config = json.load(f)
 
 
-@lru_cache(maxsize=1000)
+@disk_cache.cache
 def _get_walk_time_gmaps(origin: tuple[float, float], destination: tuple[float, float], station_name: str) -> int:
     gmaps = googlemaps.Client(key=config["gmaps_api_key"])
     result = gmaps.directions(origin=origin, destination=destination, mode="walking")
     duration_sec = result[0]["legs"][0]["duration"]["value"]
     duration_min = duration_sec / 60
-    logger.info(f"🚶🏽‍♂️ Google Maps walking time for {station_name}: {duration_min:.1f} minutes between {origin} and {destination}")
+    logger.info(
+        f"🚶🏽‍♂️ Google Maps walking time for {station_name}: {duration_min:.1f} minutes between {origin} and {destination}"
+    )
     return np.ceil(duration_min)
 
 
@@ -32,11 +36,13 @@ def get_walk_time(station: Station, current_coordinates: tuple[float, float] | N
     station_key = next((k for k in config["stations"].keys() if k in station.name.lower()), None)
     if station_key:
         walk_time = config["stations"][station_key]["walk_time"]
-        logger.info(f"🚶🏽‍♂️ Station {station.name} is configured with walk time {walk_time} minutes")
+        logger.debug(f"🚶🏽‍♂️ Station {station.name} is configured with walk time {walk_time} minutes")
         return walk_time
     else:
         destination_coordinates = (round(station.location.latitude, 4), round(station.location.longitude, 4))
-        assert current_coordinates and destination_coordinates, f"{current_coordinates=} and {destination_coordinates=} are required if Station not configured"
+        assert (
+            current_coordinates and destination_coordinates
+        ), f"{current_coordinates=} and {destination_coordinates=} are required if Station not configured"
         return _get_walk_time_gmaps(current_coordinates, destination_coordinates, station.name)
 
 

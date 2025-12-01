@@ -1,7 +1,6 @@
 import logging
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -154,9 +153,7 @@ def parse_departures(departures_data: dict) -> list[Departure]:
         when_str = departure_dict["when"]
         planned_when_str = departure_dict["plannedWhen"]
         if not isinstance(when_str, str) or not isinstance(planned_when_str, str):
-            logger.debug(
-                f"Skipping departure with invalid 'when': {when_str} or 'plannedWhen': {planned_when_str}"
-            )
+            logger.debug(f"Skipping departure with invalid 'when': {when_str} or 'plannedWhen': {planned_when_str}")
             continue
         when = datetime.fromisoformat(when_str)
         planned_when = datetime.fromisoformat(planned_when_str)

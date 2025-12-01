@@ -19,8 +19,9 @@ app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Global variable to store browser coordinates
+# Global state
 browser_coordinates = None
+cached_stations = None
 
 
 @app.route("/")
@@ -46,11 +47,22 @@ def api_location():
 @app.route("/api/stations")
 def api_stations():
     """Return station and train data as JSON."""
-    logger.info(f"----------------------------------------------------------")
-    global browser_coordinates
-    stations = get_nearby_stations(browser_coordinates)
+    logger.info("----------------------------------------------------------")
+    global browser_coordinates, cached_stations
+
+    # Check if refresh requested
+    refresh = request.args.get("refresh", "false").lower() == "true"
+
+    # Get or refresh stations
+    if cached_stations is None or refresh:
+        cached_stations = get_nearby_stations(browser_coordinates)
+        logger.info(f"🔄 {'Refreshed' if refresh else 'Fetched'} {len(cached_stations)} stations")
+    else:
+        logger.info(f"📦 Using {len(cached_stations)} cached stations")
+
     station_data = []
-    for station in stations:
+    logger.info(f"🚉 Processing stations for {len(cached_stations)} stations...")
+    for station in cached_stations:
         walk_time = get_walk_time(station, browser_coordinates)
         departures = get_inbound_trains(station)
 
