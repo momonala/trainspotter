@@ -1,23 +1,29 @@
 import logging
-from datetime import datetime, timezone
+from datetime import datetime
+from datetime import timezone
+from pathlib import Path
 
-from flask import Flask, jsonify, render_template, request
+from flask import Flask
+from flask import jsonify
+from flask import render_template
+from flask import request
 
-from utils import (
-    bearing_to_cardinal,
-    cleanse_provenance,
-    cleanse_transport_type,
-    config,
-    get_direction,
-    get_initial_bearing,
-    get_thresholds,
-    get_walk_time,
-)
-from vbb_api import get_inbound_trains, get_nearby_stations
+from .utils import bearing_to_cardinal
+from .utils import cleanse_provenance
+from .utils import cleanse_transport_type
+from .utils import config
+from .utils import get_direction
+from .utils import get_initial_bearing
+from .utils import get_thresholds
+from .utils import get_walk_time
+from .vbb_api import get_inbound_trains
+from .vbb_api import get_nearby_stations
 
-app = Flask(__name__)
+basedir = Path(__file__).parent.parent
+app = Flask(__name__, template_folder=str(basedir / "templates"), static_folder=str(basedir / "static"))
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+logging.getLogger("werkzeug").setLevel(logging.WARNING)
 
 # Global state
 browser_coordinates = None
@@ -108,5 +114,9 @@ def api_stations():
     return jsonify({"stations": station_data, "config": config})
 
 
-if __name__ == "__main__":
+def main():
     app.run(host="0.0.0.0", port=5007, debug=True)
+
+
+if __name__ == "__main__":
+    main()

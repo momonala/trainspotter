@@ -2,11 +2,11 @@
  Description=spot when the train comes!
  After=multi-user.target
 
- [Service]
- WorkingDirectory=/home/mnalavadi/trainspotter
- Type=idle
- ExecStart=/home/mnalavadi/miniconda3/envs/trainspotter/bin/python app.py
- User=mnalavadi
+[Service]
+WorkingDirectory=/home/mnalavadi/trainspotter
+Type=idle
+ExecStart=/home/mnalavadi/.local/bin/uv run app
+User=mnalavadi
 
  [Install]
  WantedBy=multi-user.target

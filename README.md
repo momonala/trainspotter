@@ -1,5 +1,8 @@
 # Trainspotter
 
+[![CI](https://github.com/momonala/trainspotter/actions/workflows/ci.yml/badge.svg)](https://github.com/momonala/trainspotter/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/momonala/trainspotter/branch/main/graph/badge.svg)](https://codecov.io/gh/momonala/trainspotter)
+
 Real-time Berlin public transport departure board with walk-time-aware color coding.
 
 ## Tech Stack
@@ -37,14 +40,15 @@ flowchart LR
 ## Prerequisites
 
 - Python 3.12+
-- Poetry
+- uv (Python package manager)
 - Google Maps API key (for dynamic walk time calculation)
 
 ## Installation
 
 1. Install dependencies:
    ```bash
-   poetry install
+   curl -LsSf https://astral.sh/uv/install.sh | sh
+   uv sync
    ```
 
 2. Configure `config.json`:
@@ -78,25 +82,26 @@ flowchart LR
 ## Running
 
 ```bash
-python app.py
+python src/app.py
 ```
 
 Web UI: http://localhost:5007
 
 Terminal view (no server):
 ```bash
-python trainspotter.py
+python src/trainspotter.py
 ```
 
 ## Project Structure
 
 ```
 trainspotter/
-├── app.py                  # Flask server, API endpoints
-├── trainspotter.py         # CLI terminal view (standalone)
-├── vbb_api.py              # VBB API client, station/departure fetching
-├── utils.py                # Walk time, thresholds, bearing calculations
-├── datamodels.py           # Dataclasses: Station, Departure, Line, etc.
+├── src/
+│   ├── app.py              # Flask server, API endpoints
+│   ├── trainspotter.py     # CLI terminal view (standalone)
+│   ├── vbb_api.py          # VBB API client, station/departure fetching
+│   ├── utils.py            # Walk time, thresholds, bearing calculations
+│   └── datamodels.py       # Dataclasses: Station, Departure, Line, etc.
 ├── config.json             # User configuration
 ├── static/
 │   ├── app.js              # Frontend logic, rendering, filters
@@ -212,8 +217,8 @@ Departure
 ```
 
 This script:
-1. Creates conda environment `trainspotter`
-2. Installs Poetry dependencies
+1. Installs uv (if not already installed)
+2. Installs dependencies via uv
 3. Installs systemd service
 4. Configures Cloudflare tunnel (optional)
 

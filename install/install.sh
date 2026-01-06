@@ -1,24 +1,31 @@
+set -e
 
-service_name="trainspotter"
-service_port=5007
-python_version="3.12"
+CYAN='\033[0;36m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
 
-set -e  # Exit immediately if a command exits with a non-zero status
-
-echo "✅ Creating conda environment: $service_name with Python $python_version"
-if ! conda env list | grep -q "^$service_name\s"; then
-    conda create -n $service_name python=$python_version -y
+echo "✅ Installing uv (Python package manager)"
+if ! command -v uv &> /dev/null; then
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+    export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
 else
-    echo "✅ Conda environment '$service_name' already exists. Skipping creation."
+    echo "✅ uv is already installed. Updating to latest version."
+    uv self update
 fi
 
-source /home/mnalavadi/miniconda3/etc/profile.d/conda.sh
-echo "✅ Activating conda environment: $service_name"
-conda activate $service_name
+echo "✅ Installing project dependencies with uv"
+uv sync
 
-echo "✅ Installing required Python packages"
-pip install -U poetry
-poetry install --no-root
+service_name=$(uv run config --project-name)
+service_port=$(uv run config --flask-port)
+
+echo "📋 Configuration:"
+{
+    uv run config --all | while IFS='=' read -r key value; do
+        echo -e "   ${CYAN}${key}${NC}|${YELLOW}${value}${NC}"
+    done
+    echo -e "   ${CYAN}cloudflare_domain${NC}|${YELLOW}${service_name}.mnalavadi.org${NC}"
+} | column -t -s '|'
 
 echo "✅ Copying service file to systemd directory"
 sudo cp install/projects_${service_name}.service /lib/systemd/system/projects_${service_name}.service

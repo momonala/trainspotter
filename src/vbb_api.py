@@ -8,7 +8,10 @@ from joblib import Memory
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-from datamodels import Departure, Station, parse_departures, parse_stations
+from .datamodels import Departure
+from .datamodels import Station
+from .datamodels import parse_departures
+from .datamodels import parse_stations
 
 logger = logging.getLogger(__name__)
 

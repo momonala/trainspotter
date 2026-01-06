@@ -1,11 +1,17 @@
 import logging
-from datetime import datetime, timezone
+from datetime import datetime
+from datetime import timezone
 
 from tabulate import tabulate
 
-from datamodels import Departure
-from utils import cleanse_transport_type, get_direction, get_platform_group, get_thresholds, get_walk_time
-from vbb_api import get_inbound_trains, get_nearby_stations
+from .datamodels import Departure
+from .utils import cleanse_transport_type
+from .utils import get_direction
+from .utils import get_platform_group
+from .utils import get_thresholds
+from .utils import get_walk_time
+from .vbb_api import get_inbound_trains
+from .vbb_api import get_nearby_stations
 
 logger = logging.getLogger(__name__)
 

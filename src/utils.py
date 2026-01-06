@@ -3,19 +3,25 @@
 import json
 import logging
 import math
+from pathlib import Path
 
 import googlemaps
 import numpy as np
 from joblib import Memory
 
-from datamodels import Departure, Station
+from .datamodels import Departure
+from .datamodels import Station
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-disk_cache = Memory(".cache", verbose=0)
+# Cache in parent directory
+basedir = Path(__file__).parent.parent
+disk_cache = Memory(str(basedir / ".cache"), verbose=0)
 
-with open("config.json", "r") as f:
+# Load config from parent directory
+config_path = basedir / "config.json"
+with open(config_path, "r") as f:
     config = json.load(f)
 
 
