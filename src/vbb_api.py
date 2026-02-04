@@ -15,6 +15,11 @@ from .datamodels import parse_stations
 
 logger = logging.getLogger(__name__)
 
+
+class VBBAPIError(Exception):
+    """Raised when the VBB/downstream API fails (timeout, connection, 5xx)."""
+
+
 disk_cache = Memory(".cache", verbose=0)
 
 # Load configuration
@@ -63,7 +68,7 @@ def get_nearby_stations(coordinates: tuple[float, float] | None = None) -> list[
         return parsed_stations
     except requests.RequestException as e:
         logger.error(f"Failed to fetch nearby stations: {e}")
-        return []
+        raise VBBAPIError(f"VBB API error: {e}") from e
 
 
 @lru_cache(maxsize=32)
@@ -89,7 +94,7 @@ def get_inbound_trains_cached(station_id: str, timestamp: str) -> list[Departure
 
     except requests.RequestException as e:
         logger.error(f"Failed to get departures for station {station_id}: {e}")
-        return []
+        raise VBBAPIError(f"VBB API error: {e}") from e
 
 
 def get_inbound_trains(station: Station) -> list[Departure]:

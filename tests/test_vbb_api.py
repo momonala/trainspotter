@@ -5,6 +5,7 @@ import pytest
 import requests
 
 from src.datamodels import Station
+from src.vbb_api import VBBAPIError
 from src.vbb_api import disk_cache
 from src.vbb_api import get_inbound_trains
 from src.vbb_api import get_nearby_stations
@@ -56,9 +57,10 @@ def test_get_nearby_stations_success(mock_get):
 def test_get_nearby_stations_handles_errors(mock_logger, mock_get):
     mock_get.side_effect = requests.RequestException("Network error")
 
-    stations = get_nearby_stations((52.5219, 13.4132))
+    with pytest.raises(VBBAPIError) as exc_info:
+        get_nearby_stations((52.5219, 13.4132))
 
-    assert stations == []
+    assert "Network error" in str(exc_info.value)
     mock_logger.error.assert_called_once()
 
 
@@ -115,7 +117,8 @@ def test_get_inbound_trains_handles_errors(mock_logger, mock_get):
     station = Mock(spec=Station)
     station.id = "900000999999"
 
-    departures = get_inbound_trains(station)
+    with pytest.raises(VBBAPIError) as exc_info:
+        get_inbound_trains(station)
 
-    assert departures == []
+    assert "Network error" in str(exc_info.value)
     mock_logger.error.assert_called()

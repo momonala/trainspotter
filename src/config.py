@@ -4,6 +4,8 @@ from pathlib import Path
 
 import typer
 
+from .values import GMAPS_API_KEY
+
 _config_file = Path(__file__).parent.parent / "pyproject.toml"
 with _config_file.open("rb") as f:
     _config = tomllib.load(f)
@@ -22,7 +24,7 @@ walk_time_buffer = _json_config["walk_time_buffer"]
 location = _json_config["location"]
 update_interval_min = _json_config["update_interval_min"]
 min_departure_time_min = _json_config["min_departure_time_min"]
-gmaps_api_key = _json_config["gmaps_api_key"]
+gmaps_api_key = GMAPS_API_KEY
 
 
 # fmt: off

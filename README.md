@@ -3,7 +3,7 @@
 [![CI](https://github.com/momonala/trainspotter/actions/workflows/ci.yml/badge.svg)](https://github.com/momonala/trainspotter/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/momonala/trainspotter/branch/main/graph/badge.svg)](https://codecov.io/gh/momonala/trainspotter)
 
-Real-time Berlin public transport departure board with walk-time-aware color coding.
+Real-time Berlin public transport departure board with walk-time-aware color coding. Optional **ESP32 e-ink display** shows a fixed station’s departures and refreshes on a schedule.
 
 ## Tech Stack
 
@@ -66,9 +66,15 @@ flowchart LR
        },
        "update_interval_min": 30,
        "min_departure_time_min": 5,
-       "gmaps_api_key": "YOUR_API_KEY"
+       "eink-display": {
+           "station_id": "900110011",
+           "station_name": "Bornholmerstr",
+           "quadrants": [ ... ]
+       }
    }
    ```
+
+   **Secrets:** Copy `src/values.example.py` to `src/values.py` (git-ignored) and set `GMAPS_API_KEY` for Google Maps walk time.
 
    | Field | Required | Description |
    |-------|----------|-------------|
@@ -76,8 +82,10 @@ flowchart LR
    | `walk_time_buffer` | Yes | Buffer ± minutes for yellow threshold zone |
    | `location.latitude/longitude` | Yes | Default coordinates (fallback if browser geolocation unavailable) |
    | `update_interval_min` | Yes | Departure fetch window in minutes |
-   | `min_departure_time_min` | Yes | Minimum time until departure to display |
-   | `gmaps_api_key` | Yes | Google Maps API key for walk time calculations |
+   | `min_departure_time_min` | Yes | Minimum minutes until departure to display (e.g. 5 = hide departures ≤5 min) |
+   | `eink-display.station_id` | Yes | VBB station ID for e-ink image API (required if using e-ink) |
+   | `eink-display.station_name` | Yes | Station name shown on e-ink display |
+   | `eink-display.quadrants` | Yes | List of exactly 4 quadrant specs: `key`, `label`, `lines`, `direction` (arrow symbol: ↑ ↓ ↻ ↺ ← →). Order = top-left, top-right, bottom-left, bottom-right. |
 
 ## Running
 
@@ -99,15 +107,21 @@ trainspotter/
 ├── src/
 │   ├── app.py              # Flask server, API endpoints
 │   ├── trainspotter.py     # CLI terminal view (standalone)
+│   ├── image_generator.py  # ESP32: filter, group, render 1-bit PNG
 │   ├── vbb_api.py          # VBB API client, station/departure fetching
 │   ├── utils.py            # Walk time, thresholds, bearing calculations
 │   └── datamodels.py       # Dataclasses: Station, Departure, Line, etc.
+│   └── values.example.py  # Template for values.py (copy to values.py, git-ignored)
 ├── config.json             # User configuration
 ├── static/
 │   ├── app.js              # Frontend logic, rendering, filters
 │   └── styles.css          # Styling with BVG/VBB line colors
 ├── templates/
 │   └── index.html          # Main page template
+├── trainspotter_eink/      # ESP32 e-ink display firmware
+│   ├── trainspotter_eink.ino
+│   ├── config.h            # WiFi, station, API URL (copy from config.example.h)
+│   └── README.md            # Hardware, pins, build & upload
 └── install/
     ├── install.sh          # Raspberry Pi deployment script
     └── projects_trainspotter.service  # systemd unit file
@@ -120,6 +134,7 @@ trainspotter/
 | `/` | GET | Main dashboard page |
 | `/api/location` | POST | Receive browser geolocation `{latitude, longitude}` |
 | `/api/stations` | GET | Returns nearby stations with departures |
+| `/api/esp32/image` | GET | 1-bit PNG (400×300) for ESP32 e-ink. Query: `?station_id=<VBB_ID>` |
 
 ### `GET /api/stations` Response
 
@@ -207,6 +222,14 @@ Departure
 - Used for walk time calculation when station not in config
 - Requires API key with Directions API enabled
 - Results cached via `@lru_cache`
+
+## E-ink display (ESP32)
+
+An optional **ESP32 + 4.2" e-ink** setup shows departures for a single station. The device fetches a pre-rendered 400×300 1-bit PNG from the server and deep-sleeps between updates.
+
+- **Hardware:** ESP32 DevKit, WeAct 4.2" e-ink (GDEY042T81, 400×300).
+- **Server:** Set `eink-display.station_id`, `eink-display.station_name`, and `eink-display.quadrants` (exactly 4 entries) in `config.json`. Missing or invalid eink-display config raises an error. Each quadrant has `key`, `label`, `lines`, and `direction` (arrow symbol: ↑ ↓ ↻ ↺ ← →). The display calls `GET /api/esp32/image?station_id=...`.
+- **Firmware:** See [trainspotter_eink/README.md](trainspotter_eink/README.md) for wiring, Arduino/CLI setup, and upload.
 
 ## Deployment
 

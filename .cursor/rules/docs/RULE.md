@@ -33,6 +33,134 @@ alwaysApply: true
 
 See file in root of project: `README.md.template`
 
+## README template
+Copy of `README.md.template` so you don't have to open another file:
+```markdown
+# {{PROJECT_NAME}}
+
+> **Purpose**: {{ONE_SENTENCE_PROBLEM_STATEMENT}}
+> **Status**: {{ACTIVE|EXPERIMENTAL|ARCHIVED}} | Last Updated: {{DATE}}
+
+## What This Solves
+
+{{2-3_SENTENCES_EXPLAINING_THE_SPECIFIC_PROBLEM_THIS_ADDRESSES}}
+
+## Configuration
+
+This project uses a dual configuration system for security. See `docs/CONFIGURATION.md` for step-by-step guidance on adding new flags or secrets.
+
+### 1. Non-Secret Config (pyproject.toml)
+Version-controlled settings in `[tool.config]`:
+```toml
+[tool.config]
+flask_port = {{PORT}}
+database_path = "data/{{DATABASE_FILE}}"
+# ... other non-secret settings
+```
+
+### 2. Secrets (src/values.py - Git-Ignored)
+Sensitive data like API keys:
+```python
+# src/values.py.example (create this file, then copy it to src/values.py)
+TELEGRAM_API_TOKEN = "your_token"
+YOUR_API_KEY = "your_key"
+```
+
+### View Config
+```bash
+uv run config --all        # Show all non-secret config
+uv run config --flask-port # Get specific value
+uv run config --help       # See all options
+```
+
+## Quick Start
+```bash
+# Install dependencies
+uv sync
+
+# Set up secrets (if needed)
+cp template-project/src/values.py.example src/values.py
+# Edit src/values.py with your actual secrets
+
+# Run
+uv run python app.py
+```
+
+Server runs at http://localhost:{{PORT}}
+
+## Architecture
+
+### Mental Model
+{{EXPLAIN_THE_CORE_ABSTRACTION_OR_PATTERN}}
+
+For example: "This is a webhook receiver that accepts events from Home Assistant, transforms them, and stores them for later analysis."
+```mermaid
+flowchart LR
+    subgraph External
+        {{EXTERNAL_SERVICE}}[{{EXTERNAL_NAME}}]
+    end
+    subgraph Storage
+        DB[({{DATABASE_FILE}})]
+    end
+    subgraph App
+        Server[{{FRAMEWORK}} Server :{{PORT}}]
+    end
+    
+    {{EXTERNAL_SERVICE}} -->|{{API_ACTION}}| Server
+    Server --> DB
+```
+
+### Data Flow
+1. {{STEP_1_WHAT_HAPPENS}}
+2. {{STEP_2_WHAT_HAPPENS}}
+3. {{STEP_3_WHAT_HAPPENS}}
+
+**Key Decision**: {{WHY_THIS_ARCHITECTURE_OVER_ALTERNATIVES}}
+
+## Tech Stack & Why
+
+| Technology | Purpose | Why This Choice |
+|------------|---------|-----------------|
+| {{LANGUAGE_VERSION}} | Runtime | {{REASON_FOR_VERSION}} |
+| {{FRAMEWORK}} | Web framework | {{WHY_NOT_ALTERNATIVES}} |
+| {{DATABASE}} | Storage | {{WHY_THIS_DB}} |
+| {{OTHER_TECH}} | {{PURPOSE}} | {{RATIONALE}} |
+
+## Project Structure
+
+```
+{{REPO_NAME}}/
+├── app.py                    # Main entry point: routes & server setup
+├── datamodels.py             # Pydantic/dataclass models for type safety
+├── db.py                     # Database connection & query utilities
+├── pyproject.toml            # Dependencies & tool config
+│
+└── install/                  # Deployment scripts (optional)
+    └── install.sh
+```
+
+**Organization Logic**: {{EXPLAIN_WHY_FILES_ARE_SPLIT_THIS_WAY}}
+
+## Key Concepts
+
+| Concept | Description | Why It Matters |
+|---------|-------------|----------------|
+| **{{CONCEPT_1}}** | {{CONCEPT_1_DESCRIPTION}} | {{WHY_UNDERSTANDING_THIS_HELPS}} |
+| **{{CONCEPT_2}}** | {{CONCEPT_2_DESCRIPTION}} | {{IMPACT_ON_DEVELOPMENT}} |
+
+## Data Models
+```python
+{{MODEL_NAME}}
+├── {{FIELD_1}}: {{FIELD_1_TYPE}}  # {{PURPOSE_OR_CONSTRAINT}}
+├── {{FIELD_2}}: {{FIELD_2_TYPE}}  # {{VALIDATION_RULES_IF_ANY}}
+└── {{FIELD_3}}: {{FIELD_3_TYPE}}  # {{OPTIONAL_OR_REQUIRED}}
+```
+
+**Validation Rules**: {{DESCRIBE_ANY_SPECIAL_VALIDATION}}
+
+**Transformation Logic**: {{IF_DATA_IS_TRANSFORMED_BEFORE_STORAGE}}
+```
+
 # Structural Documentation Rules
 
 - Skip and remove empty sections entirely.

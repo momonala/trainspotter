@@ -68,20 +68,17 @@ ehthumbs.db
 Thumbs.db
 
 # Secrets and credentials
-values.py
+**/*values.py
 google_application_credentials.json
 *.pem
 *.key
 .env
 .env.local
 secrets/
-
-
-
+config.h
 
 # Media files
 *.mp4
-*.mp3
 *.avi
 *.mov
 

@@ -42,9 +42,13 @@ def test_api_location_rounds_coordinates(client):
         assert "(52.522, 13.4132)" in str(mock_logger.info.call_args)
 
 
+@patch("src.utils.get_walk_time", return_value=10)
+@patch("src.app.get_walk_time", return_value=10)
 @patch("src.app.get_nearby_stations")
 @patch("src.app.get_inbound_trains")
-def test_api_stations_returns_json(mock_get_trains, mock_get_stations, client):
+def test_api_stations_returns_json(
+    mock_get_trains, mock_get_stations, mock_get_walk_time_app, mock_get_walk_time_utils, client
+):
     mock_station = Mock()
     mock_station.name = "Test Station"
     mock_station.distance = 100

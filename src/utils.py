@@ -3,6 +3,8 @@
 import json
 import logging
 import math
+from datetime import datetime
+from datetime import timezone
 from pathlib import Path
 
 import googlemaps
@@ -11,6 +13,7 @@ from joblib import Memory
 
 from .datamodels import Departure
 from .datamodels import Station
+from .values import GMAPS_API_KEY
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -19,10 +22,13 @@ logger = logging.getLogger(__name__)
 basedir = Path(__file__).parent.parent
 disk_cache = Memory(str(basedir / ".cache"), verbose=0)
 
-# Load config from parent directory
+# Load config from parent directory (secrets from git-ignored values.py)
 config_path = basedir / "config.json"
 with open(config_path, "r") as f:
     config = json.load(f)
+
+
+config["gmaps_api_key"] = GMAPS_API_KEY
 
 
 @disk_cache.cache
@@ -144,3 +150,46 @@ def get_direction(line: str, direction: str) -> str:
         return "↓"
     else:
         return direction
+
+
+def process_station_departures(
+    station: Station, departures: list[Departure], browser_coordinates: tuple[float, float] | None = None
+) -> list[dict]:
+    """Process departures for a station, calculating directions and wait times.
+
+    Returns list of processed departure dicts with direction_symbol, wait_time, etc.
+    """
+
+    walk_time = get_walk_time(station, browser_coordinates)
+    now = datetime.now(timezone.utc)
+
+    processed = []
+    for departure in departures:
+        if not departure.stop or not departure.stop.location:
+            continue
+        if not departure.destination or not departure.destination.location:
+            continue
+
+        start = departure.stop.location
+        stop = departure.destination.location
+        bearing = get_initial_bearing(start.latitude, start.longitude, stop.latitude, stop.longitude)
+        cardinal = bearing_to_cardinal(bearing)
+        direction_symbol = get_direction(departure.line.name, cardinal)
+
+        minutes_until = int((departure.when - now).total_seconds() / 60)
+        wait_time = minutes_until - (walk_time or 0)
+
+        processed.append(
+            {
+                "transport_type": cleanse_transport_type(departure),
+                "line": departure.line.name,
+                "when": departure.when.isoformat(),
+                "direction_symbol": direction_symbol,
+                "provenance": cleanse_provenance(departure.destination.name),
+                "wait_time": wait_time,
+                "departure": departure,  # Keep reference to original Departure object
+            }
+        )
+
+    processed.sort(key=lambda x: x["when"])
+    return processed
