@@ -1,18 +1,41 @@
 {
     "stations": {
-        "gesundbrunnen": {
-            "walk_time": 15
-        },
-        "bornholmer": {
-            "walk_time": 7
-        }
+      "gesundbrunnen": { "walk_time": 15 },
+      "bornholmer": { "walk_time": 7 }
     },
     "walk_time_buffer": 2,
-    "location": {
-        "latitude": 52.552045,
-        "longitude": 13.399863
-    },
+    "location": { "latitude": 52.552045, "longitude": 13.399863 },
     "update_interval_min": 30,
     "min_departure_time_min": 5,
-    "gmaps_api_key": "AIzaSyCSPrhcNU66SnFzVbA9vYh7socHhLzDs-I"
-} 
+    "eink-display": {
+      "station_id": "900110011",
+      "station_name": "Bornholmerstr",
+      "quadrants": [
+        {
+          "key": "s1_26_up",
+          "label": "S1/26",
+          "lines": ["S1", "S2", "S25", "S26"],
+          "direction": "↑"
+        },
+        {
+          "key": "s1_26_down",
+          "label": "S1/26",
+          "lines": ["S1", "S2", "S25", "S26"],
+          "direction": "↓"
+        },
+        {
+          "key": "s8_up",
+          "label": "S8/85",
+          "lines": ["S8", "S85"],
+          "direction": "↑"
+        },
+        {
+          "key": "s8_clockwise",
+          "label": "S8/85",
+          "lines": ["S8", "S85"],
+          "direction": "↻"
+        }
+      ]
+    }
+  }
+  

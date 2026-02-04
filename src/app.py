@@ -2,21 +2,22 @@ import logging
 from datetime import datetime
 from datetime import timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from flask import Flask
+from flask import Response
 from flask import jsonify
 from flask import render_template
 from flask import request
 
-from .utils import bearing_to_cardinal
-from .utils import cleanse_provenance
-from .utils import cleanse_transport_type
+from .image_generator import filter_and_group
+from .image_generator import render_image
 from .utils import config
-from .utils import get_direction
-from .utils import get_initial_bearing
 from .utils import get_thresholds
 from .utils import get_walk_time
+from .utils import process_station_departures
 from .vbb_api import get_inbound_trains
+from .vbb_api import get_inbound_trains_cached
 from .vbb_api import get_nearby_stations
 
 basedir = Path(__file__).parent.parent
@@ -71,35 +72,10 @@ def api_stations():
     for station in cached_stations:
         walk_time = get_walk_time(station, browser_coordinates)
         departures = get_inbound_trains(station)
+        processed_departures = process_station_departures(station, departures, browser_coordinates)
 
-        # Create a single list of departures for this station
-        station_departures = []
-
-        for departure in departures:
-            start = departure.stop.location
-            stop = departure.destination.location
-            bearing = get_initial_bearing(start.latitude, start.longitude, stop.latitude, stop.longitude)
-            direction = bearing_to_cardinal(bearing)
-            direction = get_direction(departure.line.name, direction)
-
-            # Calculate wait time (time until departure minus walk time)
-            now = datetime.now(timezone.utc)
-            minutes_until = int((departure.when - now).total_seconds() / 60)
-            wait_time = minutes_until - (walk_time or 0)  # If no walk time, assume 0
-
-            station_departures.append(
-                {
-                    "transport_type": cleanse_transport_type(departure),
-                    "line": departure.line.name,
-                    "when": departure.when.isoformat(),
-                    "direction_symbol": direction,
-                    "provenance": cleanse_provenance(departure.destination.name),
-                    "wait_time": wait_time,
-                }
-            )
-
-        # Sort all departures by time
-        station_departures.sort(key=lambda x: x["when"])
+        # Remove departure object reference before JSON serialization
+        station_departures = [{k: v for k, v in d.items() if k != "departure"} for d in processed_departures]
 
         red_threshold, yellow_threshold = get_thresholds(walk_time) if walk_time is not None else (None, None)
         station_data.append(
@@ -112,6 +88,32 @@ def api_stations():
             }
         )
     return jsonify({"stations": station_data, "config": config})
+
+
+@app.route("/api/esp32/image")
+def api_esp32_image():
+    """Generate PNG image for e-ink display."""
+    eink = config["eink-display"]
+    station_id = request.args.get("station_id", eink["station_id"])
+    now = datetime.now(timezone.utc)
+
+    cache_key = now.strftime("%Y%m%d%H%M%S")[:-1]
+    departures = get_inbound_trains_cached(station_id, cache_key) or []
+
+    quadrants_data = filter_and_group(
+        departures,
+        now,
+        quadrants_config=eink["quadrants"],
+        min_minutes=config["min_departure_time_min"],
+    )
+
+    station_name = eink["station_name"]
+    display_time = now.astimezone(ZoneInfo("Europe/Berlin"))
+    logger.info(
+        f"🔄 Generated image for {station_id}. {len(departures)} departures. Quadrants: {[len(d.minutes_list) for d in quadrants_data]}"
+    )
+
+    return Response(render_image(quadrants_data, station_name, display_time), mimetype="image/png")
 
 
 def main():

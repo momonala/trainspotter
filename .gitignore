@@ -70,6 +70,7 @@ Thumbs.db
 # Secrets and credentials
 values.py
 google_application_credentials.json
+config.h
 *.pem
 *.key
 .env
