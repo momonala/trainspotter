@@ -55,10 +55,7 @@ flowchart TB
     ensureWiFi -->|fail| showErrorW[showError ERR_WIFI]
     showErrorW --> wait[Wait ERROR_RETRY_INTERVAL]
     wait --> loop
-    ensureWiFi -->|ok| sync[syncTime]
-    sync -->|fail| showErrorN[showError ERR_NTP]
-    showErrorN --> loop
-    sync -->|ok| fetch[fetchAndDisplay]
+    ensureWiFi -->|ok| fetch[fetchAndDisplay]
     fetch -->|fail| showErrorX[showError type detail]
     showErrorX --> loop
     fetch -->|ok| waitChunk[waitWithButtonPolling]
@@ -93,13 +90,13 @@ flowchart TB
 
 **Server:** Config and VBB API produce departures; `filter_and_group` turns them into four quadrants; `render_image` draws station name, date/time, and quadrant labels + arrows + “next N minutes” badges into a 1-bit PNG.
 
-**ESP32:** `loop()` checks for button presses, then delegates to `handleLiveViewCycle()` or `handleDebugViewCycle()`. Live view: `ensureWiFiConnected()` → `syncTime()` → `fetchAndDisplay()` (GET PNG, stream to RAM, decode via PNGdec, draw with GxEPD2). On failure, `showError()` does a full refresh and draws diagnostics (cycles, Active since, Now, Last OK, error counts). After success, waits `UPDATE_INTERVAL_SECONDS` (or `ERROR_RETRY_INTERVAL_SECONDS` on error) using `waitWithButtonPolling()` to allow button toggling without waiting the full interval.
+**ESP32:** In `setup()`, after WiFi connect, NTP sync runs and retries until success (failures are recorded for diagnostics; no error screen during boot). `loop()` checks for scheduled reboot (every 10 h), then button, then delegates to `handleLiveViewCycle()` or `handleDebugViewCycle()`. Live view: `ensureWiFiConnected()` → `fetchAndDisplay()` (GET PNG, stream to RAM, decode via PNGdec, draw with GxEPD2). WiFi reconnection escalates through three tiers: soft reconnect → full hardware reset → ESP.restart(). On failure, `showError()` does a full refresh and draws diagnostics (cycles, Active since, Now, Last OK, Next reboot, error counts, consecutive WiFi fails). After success, waits `UPDATE_INTERVAL_SECONDS` (or `ERROR_RETRY_INTERVAL_SECONDS` on error) using `waitWithButtonPolling()` to allow button toggling without waiting the full interval.
 
 **Button:** BOOT (GPIO 0). Toggle switches between live departure image and diagnostics. When you open diagnostics via the button, the title line shows “Error debug view” instead of the last error message.
 
 ### Error types (diagnostics screen)
 
-The device reports 10 error categories; the diagnostics screen shows one row per type with a count. Some errors include a short detail in parentheses:
+The device reports 9 error categories; the diagnostics screen shows one row per type with a count, plus Active since, Now, Last OK, and Next reboot (wall-clock time and countdown). Some errors include a short detail in parentheses:
 
 | Type | Label | Detail examples |
 |------|--------|------------------|
@@ -107,10 +104,9 @@ The device reports 10 error categories; the diagnostics screen shows one row per
 | Server | Server connection refused | — |
 | Server | Server connection lost | — |
 | Server | HTTP 502 - VBB API error | — |
-| Server | HTTP 404 - not found | — |
-| Server | other HTTP error | `HTTP 500`, `HTTP 503` |
+| Server | other HTTP error | `HTTP 404`, `HTTP 500`, `HTTP 503` |
 | Memory | Out of memory | — |
-| NTP | NTP time sync error | — |
+| NTP | NTP time sync error | `boot` |
 | Download | Download error | `Size`, `Timeout`, `Incomplete` |
 | Image | Image decode error | `Page decode` (or none for decode/size) |
 
@@ -118,8 +114,8 @@ The device reports 10 error categories; the diagnostics screen shows one row per
 
 At 115200 baud the serial monitor shows:
 
-- **[WiFi]** – Connecting, Connected (IP), Disconnected reconnecting, Reconnected (IP), Reconnect failed, Failed (status)
-- **[NTP]** – Syncing, OK, Failed
+- **[WiFi]** – Connecting, Connected (IP), Soft reconnect, Hard reconnect (full reset), Failed (consecutive: N), Too many consecutive failures rebooting
+- **[NTP]** – OK (after sync at boot), Attempt failed (attempt N) when retrying at boot
 - **[HTTP]** – GET URL, Response code (if not 200), 200 OK, Content-Length, Body bytes and elapsed ms; Invalid size, Body read timeout, Incomplete on failure
 - **[PNG]** – Decode failed, Reopen failed, Page decode failed, Too large
 - **[Memory]** – Allocation failed
