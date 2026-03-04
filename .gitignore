@@ -75,7 +75,7 @@ google_application_credentials.json
 .env
 .env.local
 secrets/
-config.h
+trainspotter_eink/config.h
 
 # Media files
 *.mp4
@@ -93,3 +93,4 @@ static/*.html
 # Local development
 .local/
 .ipython/
+.cursor/
