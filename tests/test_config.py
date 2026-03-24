@@ -15,7 +15,7 @@ runner = CliRunner()
     [
         ("--project-name", "trainspotter"),
         ("--project-version", "0.1.0"),
-        ("--flask-port", "5006"),
+        ("--flask-port", "5007"),
     ],
 )
 def test_config_returns_single_value(flag: str, expected_output: str):

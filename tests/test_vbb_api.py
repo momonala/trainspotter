@@ -121,4 +121,3 @@ def test_get_inbound_trains_handles_errors(mock_logger, mock_get):
         get_inbound_trains(station)
 
     assert "Network error" in str(exc_info.value)
-    mock_logger.error.assert_called()

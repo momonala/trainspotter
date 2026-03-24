@@ -66,7 +66,7 @@ flowchart LR
        },
        "update_interval_min": 30,
        "min_departure_time_min": 5,
-       "eink-display": {
+       "esp32-display": {
            "station_id": "900110011",
            "station_name": "Bornholmerstr",
            "quadrants": [ ... ]
@@ -83,9 +83,9 @@ flowchart LR
    | `location.latitude/longitude` | Yes | Default coordinates (fallback if browser geolocation unavailable) |
    | `update_interval_min` | Yes | Departure fetch window in minutes |
    | `min_departure_time_min` | Yes | Minimum minutes until departure to display (e.g. 5 = hide departures ≤5 min) |
-   | `eink-display.station_id` | Yes | VBB station ID for e-ink image API (required if using e-ink) |
-   | `eink-display.station_name` | Yes | Station name shown on e-ink display |
-   | `eink-display.quadrants` | Yes | List of exactly 4 quadrant specs: `key`, `label`, `lines`, `direction` (arrow symbol: ↑ ↓ ↻ ↺ ← →). Order = top-left, top-right, bottom-left, bottom-right. |
+   | `esp32-display.station_id` | Yes | VBB station ID for e-ink image API (required if using e-ink) |
+   | `esp32-display.station_name` | Yes | Station name shown on e-ink display |
+   | `esp32-display.quadrants` | Yes | List of exactly 4 quadrant specs: `key`, `label`, `lines`, `direction` (arrow symbol: ↑ ↓ ↻ ↺ ← →). Order = top-left, top-right, bottom-left, bottom-right. |
 
 ## Running
 
@@ -228,7 +228,7 @@ Departure
 An optional **ESP32 + 4.2" e-ink** setup shows departures for a single station. The device fetches a pre-rendered 400×300 1-bit PNG from the server and deep-sleeps between updates.
 
 - **Hardware:** ESP32 DevKit, WeAct 4.2" e-ink (GDEY042T81, 400×300).
-- **Server:** Set `eink-display.station_id`, `eink-display.station_name`, and `eink-display.quadrants` (exactly 4 entries) in `config.json`. Missing or invalid eink-display config raises an error. Each quadrant has `key`, `label`, `lines`, and `direction` (arrow symbol: ↑ ↓ ↻ ↺ ← →). The display calls `GET /api/esp32/image?station_id=...`.
+- **Server:** Set `esp32-display.station_id`, `esp32-display.station_name`, and `esp32-display.quadrants` (exactly 4 entries) in `config.json`. Missing or invalid esp32-display config raises an error. Each quadrant has `key`, `label`, `lines`, and `direction` (arrow symbol: ↑ ↓ ↻ ↺ ← →). The display calls `GET /api/esp32/image?station_id=...`.
 - **Firmware:** See [trainspotter_eink/README.md](trainspotter_eink/README.md) for wiring, Arduino/CLI setup, and upload.
 
 ## Deployment

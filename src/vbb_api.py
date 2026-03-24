@@ -14,6 +14,7 @@ from .datamodels import parse_departures
 from .datamodels import parse_stations
 
 logger = logging.getLogger(__name__)
+logging.getLogger("urllib3.connectionpool").setLevel(logging.ERROR)
 
 
 class VBBAPIError(Exception):
@@ -93,7 +94,7 @@ def get_inbound_trains_cached(station_id: str, timestamp: str) -> list[Departure
         return parsed_departures
 
     except requests.RequestException as e:
-        logger.error(f"Failed to get departures for station {station_id}: {e}")
+        logger.debug(f"Failed to get departures for station {station_id}: {e}")
         raise VBBAPIError(f"VBB API error: {e}") from e
 
 

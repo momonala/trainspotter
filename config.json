@@ -7,7 +7,7 @@
     "location": { "latitude": 52.552045, "longitude": 13.399863 },
     "update_interval_min": 30,
     "min_departure_time_min": 5,
-    "eink-display": {
+    "esp32-display": {
       "station_id": "900110011",
       "station_name": "Bornholmerstr",
       "quadrants": [

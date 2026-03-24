@@ -25,10 +25,11 @@ dependencies = [
     "ruff>=0.14.10",
     "isort>=7.0.0",
     "typer>=0.9.0",
+    "freezegun>=1.5.5",
 ]
 
 [tool.config]
-flask_port = 5006
+flask_port = 5007
 
 [build-system]
 requires = ["hatchling"]
