@@ -11,6 +11,11 @@ from flask import make_response
 from flask import render_template
 from flask import request
 
+from .config import FLASK_PORT
+from .datamodels import Departure
+from .departures_fallback import get_fallback_departures
+from .departures_fallback import get_snapshot_age_hhmmss
+from .departures_fallback import store_departures_snapshot
 from .image_generator import filter_and_group
 from .image_generator import render_image
 from .utils import config
@@ -92,55 +97,75 @@ def api_stations():
     return jsonify({"stations": station_data, "config": config})
 
 
+def _fetch_esp32_departures(station_id: str, now: datetime, cache_key: str) -> tuple[list[Departure], bool] | None:
+    """Return departures and source flag, or None when no valid fallback exists."""
+    try:
+        fresh_departures = get_inbound_trains_cached(station_id, cache_key) or []
+        store_departures_snapshot(station_id, fresh_departures, now)
+        logger.info(f"🫧 esp32/image: using fresh departures station_id={station_id} count={len(fresh_departures)}")
+        return fresh_departures, False
+    except VBBAPIError:
+        fallback_departures = get_fallback_departures(station_id, now)
+        if fallback_departures is None:
+            logger.warning(f"❌ esp32/image: no fallback departures for station {station_id}")
+            return None
+
+        age = get_snapshot_age_hhmmss(station_id, now) or "no fallback available"
+        logger.info(f"⚠️ esp32/image: using stale departures fallback {age=} {len(fallback_departures)=}")
+        return fallback_departures, True
+
+
+def _render_esp32_image(
+    departures: list[Departure],
+    now: datetime,
+    station_id: str,
+    cache_key: str,
+    display_config: dict,
+) -> Response:
+    """Render the e-ink PNG response from departures."""
+    if not departures:
+        logger.warning(f"❌ esp32/image: no departures for station {station_id}")
+        station_name = display_config.get("station_name", "")
+        display_time = now.astimezone(ZoneInfo("Europe/Berlin"))
+        return Response(render_image([], station_name, display_time), mimetype="image/png")
+
+    quadrants_data = filter_and_group(
+        departures,
+        now,
+        quadrants_config=display_config["quadrants"],
+        min_minutes=config["min_departure_time_min"],
+    )
+    station_name = display_config["station_name"]
+    display_time = now.astimezone(ZoneInfo("Europe/Berlin"))
+    img = render_image(quadrants_data, station_name, display_time)
+    logger.debug(f"📸 esp32/image: {station_id=} {cache_key=} size={len(img) / 1024:.1f}KB")
+    return Response(img, mimetype="image/png")
+
+
 @app.route("/api/esp32/image")
 def api_esp32_image():
     """Generate PNG image for e-ink display."""
-    eink = config["eink-display"]
-    station_id = request.args.get("station_id", eink["station_id"])
+    display_config = config["esp32-display"]
+    station_id = request.args.get("station_id", display_config["station_id"])
     now = datetime.now(timezone.utc)
     cache_key = now.strftime("%Y%m%d%H%M%S")[:-1]
     try:
-        departures = get_inbound_trains_cached(station_id, cache_key) or []
-    except VBBAPIError as e:
-        logger.warning("esp32/image: downstream VBB API failed: %s", e)
-        # error_response = jsonify({"error": "Downstream API unavailable", "detail": str(e)})
-        # response = make_response(error_response, 502)
-        response = make_response("", 502)
-        response.headers["Content-Length"] = "0"
-        return response
-    except Exception as e:
-        logger.exception("esp32/image: failed to fetch departures: %s", e)
-        error_response = jsonify({"error": "Departures fetch failed", "detail": str(e)})
-        response = make_response(error_response, 500)
-        return response
-
-    try:
-        if not departures:
-            logger.warning("esp32/image: no departures for station %s", station_id)
-            station_name = eink.get("station_name", "")
-            display_time = now.astimezone(ZoneInfo("Europe/Berlin"))
-            return Response(render_image([], station_name, display_time), mimetype="image/png")
-
-        quadrants_data = filter_and_group(
-            departures,
-            now,
-            quadrants_config=eink["quadrants"],
-            min_minutes=config["min_departure_time_min"],
-        )
-        station_name = eink["station_name"]
-        display_time = now.astimezone(ZoneInfo("Europe/Berlin"))
-        img = render_image(quadrants_data, station_name, display_time)
-        logger.info("esp32/image: station_id=%s cache_key=%s size=%.1fKB", station_id, cache_key, len(img) / 1024)
-        return Response(img, mimetype="image/png")
-    except Exception as e:
-        logger.exception("esp32/image: failed to build or render image: %s", e)
-        error_response = jsonify({"error": "Image generation failed", "detail": str(e)})
-        response = make_response(error_response, 500)
-        return response
+        fetch_result = _fetch_esp32_departures(station_id, now, cache_key)
+        if fetch_result is None:
+            # empty 502 response for downstream outages.
+            response = make_response("", 502)
+            response.headers["Content-Length"] = "0"
+            return response
+        departures, _used_fallback = fetch_result
+        return _render_esp32_image(departures, now, station_id, cache_key, display_config)
+    except Exception as error:
+        logger.exception(f"❌ esp32/image: failed to build response: {error}")
+        error_response = jsonify({"error": "Image generation failed", "detail": str(error)})
+        return make_response(error_response, 500)
 
 
 def main():
-    app.run(host="0.0.0.0", port=5007, debug=True)
+    app.run(host="0.0.0.0", port=FLASK_PORT, debug=True)
 
 
 if __name__ == "__main__":
