@@ -1,10 +1,12 @@
 import json
 import logging
+import math
 from datetime import datetime
 from functools import lru_cache
+from operator import itemgetter
+from pathlib import Path
 
 import requests
-from joblib import Memory
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
@@ -21,11 +23,25 @@ class VBBAPIError(Exception):
     """Raised when the VBB/downstream API fails (timeout, connection, 5xx)."""
 
 
-disk_cache = Memory(".cache", verbose=0)
-
 # Load configuration
 with open("config.json", "r") as f:
     config = json.load(f)
+
+_MAX_STRAIGHTLINE_DISTANCE_M = float(config.get("max_nearby_straightline_m", 1500))
+
+
+def _load_station_snapshot(path: Path) -> list[dict]:
+    """Load the static stop list produced by scripts/fetch_stations.py."""
+    if not path.exists():
+        raise FileNotFoundError(
+            f"Station data not found at {path}. Run `python scripts/fetch_stations.py` to generate it."
+        )
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+_STATIONS_PATH = Path(__file__).resolve().parent.parent / "data" / "vbb_stations.json"
+_ALL_STATIONS: list[dict] = _load_station_snapshot(_STATIONS_PATH)
+logger.info(f"📂 Loaded {len(_ALL_STATIONS)} stations from {_STATIONS_PATH.name}")
 
 # Configure requests session with retries and timeouts
 session = requests.Session()
@@ -41,35 +57,58 @@ session.mount("https://", adapter)
 # Request timeout in seconds
 TIMEOUT = 5
 
+MAX_NEARBY_STATIONS = 20
+_EARTH_RADIUS_M = 6_371_000
 
-@disk_cache.cache
+
+def _haversine_meters(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Great-circle distance between two WGS84 points in meters."""
+    phi1, phi2 = math.radians(lat1), math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlam = math.radians(lon2 - lon1)
+    a = math.sin(dphi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlam / 2) ** 2
+    return 2 * _EARTH_RADIUS_M * math.asin(math.sqrt(a))
+
+
+def _rank_stops_by_distance(
+    stops: list[dict],
+    latitude: float,
+    longitude: float,
+    limit: int,
+    max_straightline_m: float,
+) -> list[tuple[float, dict]]:
+    """Sort by geodesic distance; keep stops within `max_straightline_m`, then take the closest `limit`."""
+    pairs: list[tuple[float, dict]] = []
+    for stop in stops:
+        loc = stop["location"]
+        meters = _haversine_meters(latitude, longitude, loc["latitude"], loc["longitude"])
+        if meters > max_straightline_m:
+            continue
+        pairs.append((meters, stop))
+    pairs.sort(key=itemgetter(0))
+    return pairs[:limit]
+
+
+def _suburban_first_sort_key(station: Station) -> int:
+    """S-Bahn stops sort before others; stable sort keeps distance order within each group."""
+    return 0 if station.products.suburban else 1
+
+
 def get_nearby_stations(coordinates: tuple[float, float] | None = None) -> list[Station]:
-    """Get nearby stations that have S-Bahn service.
-    Args:
-        coordinates: Optional tuple of (latitude, longitude). If None, uses config coordinates.
-    """
-    logger.info("🔦 Fetching nearby stations...")
-    if coordinates:
-        logger.info(f"Using provided coordinates: {coordinates}")
+    """Return the closest stops from the local snapshot within straight-line radius, S-Bahn first."""
+    if coordinates is not None:
+        lat, lon = coordinates
+        logger.info(f"📍 Using provided coordinates: {coordinates}")
     else:
-        coordinates = (config["location"]["latitude"], config["location"]["longitude"])
-        logger.info(f"Using config coordinates: {config['location']['latitude']}, {config['location']['longitude']}")
-    lat, long = coordinates
-    try:
-        location_resp = session.get(
-            "https://v6.vbb.transport.rest/locations/nearby",
-            params={"latitude": lat, "longitude": long, "results": 20},
-            timeout=TIMEOUT,
-        )
-        location_resp.raise_for_status()
-        stations = location_resp.json()
-        parsed_stations = parse_stations(stations)
-        parsed_stations.sort(key=lambda station: not station.products.suburban)
-        logger.info(f"👀 Found {len(parsed_stations)} nearby stations")
-        return parsed_stations
-    except requests.RequestException as e:
-        logger.error(f"Failed to fetch nearby stations: {e}")
-        raise VBBAPIError(f"VBB API error: {e}") from e
+        lat = config["location"]["latitude"]
+        lon = config["location"]["longitude"]
+        logger.info(f"📍 Using config coordinates: ({lat}, {lon})")
+    nearest = _rank_stops_by_distance(_ALL_STATIONS, lat, lon, MAX_NEARBY_STATIONS, _MAX_STRAIGHTLINE_DISTANCE_M)
+    station_dicts = [{**stop, "distance": int(round(meters))} for meters, stop in nearest]
+    parsed = parse_stations(station_dicts)
+    parsed.sort(key=_suburban_first_sort_key)
+    logger.info(f"👀 Found {len(parsed)} nearby stations")
+    return parsed
 
 
 @lru_cache(maxsize=32)

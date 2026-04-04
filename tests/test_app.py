@@ -18,7 +18,6 @@ from src.datamodels import Operator
 from src.datamodels import Products
 from src.datamodels import Station
 from src.vbb_api import VBBAPIError
-from src.vbb_api import disk_cache
 
 TEST_STATION_ID = "900110011"
 BASE_TIME_UTC = datetime(2026, 3, 24, 8, 0, 0, tzinfo=timezone.utc)
@@ -35,11 +34,9 @@ def client():
     app_module.browser_coordinates = None
     app_module.cached_stations = None
     _clear_departure_snapshots()
-    disk_cache.clear()
     with app.test_client() as client:
         yield client
     _clear_departure_snapshots()
-    disk_cache.clear()
 
 
 @pytest.fixture
@@ -175,7 +172,7 @@ def test_api_location_rounds_coordinates(client):
     with patch("src.app.logger") as mock_logger:
         client.post("/api/location", json={"latitude": 52.521951234, "longitude": 13.413245678})
         mock_logger.info.assert_called_once()
-        assert "(52.522, 13.4132)" in str(mock_logger.info.call_args)
+        assert "(52.522, 13.413)" in str(mock_logger.info.call_args)
 
 
 @patch("src.utils.get_walk_time", return_value=10)

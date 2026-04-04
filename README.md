@@ -11,31 +11,99 @@ Python 3.12, Flask, VBB Transport REST API, Google Maps Directions API, Vanilla 
 
 ## Architecture
 
+The dashboard **does not** call VBB for “nearby stops” on each request. Stops come from a **bundled JSON snapshot** (`data/vbb_stations.json`). The server ranks them with **haversine distance** from the user, applies **`max_nearby_straightline_m`**, then calls VBB **only for departures** (and Google Maps for walk times when a stop is not in `config.json`).
+
+### Build-time: stop snapshot
+
+Run when you change the fetch grid or need fresher stop metadata (new platforms, renames, etc.):
+
+```bash
+python scripts/fetch_stations.py
+```
+
 ```mermaid
 flowchart LR
-    subgraph External
-        VBB[VBB API<br/>v6.vbb.transport.rest]
-        GMaps[Google Maps<br/>Directions API]
-        Browser[Browser<br/>Geolocation]
-    end
-    
-    subgraph App
-        Flask[Flask :5007]
-        Cache[LRU Cache]
-    end
-    
-    subgraph Frontend
-        HTML[index.html]
-        JS[app.js]
-    end
-
-    VBB -->|stations, departures| Cache
-    GMaps -->|walk times| Cache
-    Cache --> Flask
-    Browser -->|coordinates| Flask
-    Flask -->|JSON| JS
-    JS --> HTML
+  subgraph buildSnapshot [Build snapshot]
+    Script[fetch_stations.py]
+    VBBnear[VBB GET locations nearby]
+    JsonFile[(data/vbb_stations.json)]
+    Script -->|grid of lat or lon anchors| VBBnear
+    VBBnear -->|stop metadata| Script
+    Script -->|write| JsonFile
+  end
 ```
+
+### Runtime: components
+
+```mermaid
+flowchart TB
+  subgraph disk [On disk]
+    Config[config.json]
+    Snapshot[(vbb_stations.json)]
+  end
+
+  subgraph server [Flask server]
+    Api[app.py endpoints]
+    VbbMod[vbb_api.py]
+    Utils[utils.py]
+  end
+
+  subgraph external [Network]
+    VBBdep[VBB GET stops id departures]
+    GMaps[Google Directions]
+  end
+
+  subgraph client [Browser]
+    Js[app.js]
+    Page[index.html]
+  end
+
+  Config --> Api
+  Config --> Utils
+  Snapshot -->|loaded at import| VbbMod
+  Js -->|POST coords| Api
+  Js -->|GET stations| Api
+  Api --> VbbMod
+  Api --> Utils
+  VbbMod -->|per stop LRU keyed| VBBdep
+  Utils -->|walk time if needed| GMaps
+  Api -->|JSON| Js
+  Js --> Page
+```
+
+### Runtime: dashboard request flow
+
+Typical session: one **full** `GET /api/stations` after geolocation (server may refresh its pinned stop list), then **repeat** `GET /api/stations` on an interval and on the refresh button **without** re-resolving nearby stops (same as today’s `app.js` behavior—full reload of the page redoes GPS and stop pinning).
+
+```mermaid
+sequenceDiagram
+  participant Browser
+  participant Flask as FlaskApi
+  participant Snapshot as vbb_stationsJson
+  participant VBB as VBBdepartures
+  participant GMaps as GoogleDirections
+
+  Browser->>Flask: POST /api/location lat lon
+  Note over Browser,Flask: First board load often uses refresh=true once
+  Browser->>Flask: GET /api/stations
+  Flask->>Snapshot: haversine rank within max_nearby_straightline_m
+  loop Each selected stop up to 20
+    Flask->>GMaps: walking duration if stop not in config stations
+    Flask->>VBB: GET stops id departures
+  end
+  Flask-->>Browser: stations plus departures plus timeConfig
+
+  loop Every 30s or toolbar refresh
+    Browser->>Flask: GET /api/stations no refresh
+    Note over Flask: Reuse cached stop list same coords
+    loop Each pinned stop
+      Flask->>VBB: GET stops id departures
+    end
+    Flask-->>Browser: updated departures
+  end
+```
+
+**ESP32** (`GET /api/esp32/image`) skips the snapshot: it uses a **fixed** `station_id` from config and only talks to VBB (and optional local departure fallback); see the E-ink section below.
 
 ## Prerequisites
 
@@ -64,6 +132,7 @@ flowchart LR
            "latitude": 52.552045,
            "longitude": 13.399863
        },
+       "max_nearby_straightline_m": 1500,
        "update_interval_min": 30,
        "min_departure_time_min": 5,
        "esp32-display": {
@@ -81,6 +150,7 @@ flowchart LR
    | `stations.<name>.walk_time` | No | Preconfigured walk time in minutes (overrides Google Maps) |
    | `walk_time_buffer` | Yes | Buffer ± minutes for yellow threshold zone |
    | `location.latitude/longitude` | Yes | Default coordinates (fallback if browser geolocation unavailable) |
+   | `max_nearby_straightline_m` | No | Max straight-line distance (meters) from user to a stop; default `1500`. Stops beyond this are ignored. |
    | `update_interval_min` | Yes | Departure fetch window in minutes |
    | `min_departure_time_min` | Yes | Minimum minutes until departure to display (e.g. 5 = hide departures ≤5 min) |
    | `esp32-display.station_id` | Yes | VBB station ID for e-ink image API (required if using e-ink) |
@@ -104,14 +174,18 @@ python src/trainspotter.py
 
 ```
 trainspotter/
+├── data/
+│   └── vbb_stations.json   # Stop snapshot (generate with scripts/fetch_stations.py)
+├── scripts/
+│   └── fetch_stations.py   # Builds vbb_stations.json via VBB /locations/nearby grid
 ├── src/
 │   ├── app.py              # Flask server, API endpoints
 │   ├── trainspotter.py     # CLI terminal view (standalone)
 │   ├── image_generator.py  # ESP32: filter, group, render 1-bit PNG
-│   ├── vbb_api.py          # VBB API client, station/departure fetching
+│   ├── vbb_api.py          # Local nearby ranking, VBB departures client
 │   ├── utils.py            # Walk time, thresholds, bearing calculations
-│   └── datamodels.py       # Dataclasses: Station, Departure, Line, etc.
-│   └── values.example.py  # Template for values.py (copy to values.py, git-ignored)
+│   ├── datamodels.py       # Dataclasses: Station, Departure, Line, etc.
+│   └── values.example.py   # Template for values.py (copy to values.py, git-ignored)
 ├── config.json             # User configuration
 ├── static/
 │   ├── app.js              # Frontend logic, rendering, filters
@@ -213,15 +287,16 @@ Departure
 ### VBB Transport REST API
 - Base: `https://v6.vbb.transport.rest`
 - Endpoints used:
-  - `/locations/nearby` - Find stations near coordinates
-  - `/stops/{id}/departures` - Get departures for a station
+  - `/locations/nearby` - Used only by `scripts/fetch_stations.py` to build `data/vbb_stations.json` (not on each user request)
+  - `/stops/{id}/departures` - Live departures for each stop
 - No auth required
 - Unofficial API, no SLA
+- Regenerate the local stop list after changing the grid in `scripts/fetch_stations.py`: `python scripts/fetch_stations.py`
 
 ### Google Maps Directions API
 - Used for walk time calculation when station not in config
 - Requires API key with Directions API enabled
-- Results cached via `@lru_cache`
+- Results cached via `joblib` disk cache in `utils.py` (keyed by origin/destination coordinates)
 
 ## E-ink display (ESP32)
 
