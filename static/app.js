@@ -475,9 +475,10 @@ window.addEventListener('DOMContentLoaded', async () => {
         }
     }
 
-    // Set up refresh button - force refresh stations on manual click
+    // Refresh button fetches fresh departures only (same as 30s poll).
+    // To rediscover stations / walk times, do a full page reload.
     if (refreshButton) {
-        refreshButton.addEventListener('click', () => refreshData(true));
+        refreshButton.addEventListener('click', () => refreshData(false));
     }
 
     // Update "last updated" display every second

@@ -13,6 +13,7 @@ from flask import request
 
 from .config import FLASK_PORT
 from .datamodels import Departure
+from .datamodels import Station
 from .departures_fallback import get_fallback_departures
 from .departures_fallback import get_snapshot_age_hhmmss
 from .departures_fallback import store_departures_snapshot
@@ -36,6 +37,23 @@ logging.getLogger("werkzeug").setLevel(logging.WARNING)
 # Global state
 browser_coordinates = None
 cached_stations = None
+COORDINATE_ACCURACY_DECIMALS = 3
+
+
+def _station_board_row(station: Station, user_coords: tuple[float, float] | None) -> dict:
+    """One station's departures and timing metadata for the dashboard JSON."""
+    walk_time = get_walk_time(station, user_coords)
+    departures = get_inbound_trains(station)
+    processed = process_station_departures(station, departures, user_coords)
+    station_departures = [{k: v for k, v in row.items() if k != "departure"} for row in processed]
+    red_threshold, yellow_threshold = get_thresholds(walk_time) if walk_time is not None else (None, None)
+    return {
+        "name": station.name,
+        "distance": station.distance,
+        "walkTime": walk_time,
+        "departures": station_departures,
+        "timeConfig": {"buffer": red_threshold, "yellowThreshold": yellow_threshold},
+    }
 
 
 @app.route("/")
@@ -53,7 +71,10 @@ def api_location():
     location_data = request.get_json()
     latitude = location_data.get("latitude")
     longitude = location_data.get("longitude")
-    browser_coordinates = (round(latitude, 4), round(longitude, 4))
+    browser_coordinates = (
+        round(latitude, COORDINATE_ACCURACY_DECIMALS),
+        round(longitude, COORDINATE_ACCURACY_DECIMALS),
+    )
     logger.info(f"📍 Received location: {browser_coordinates}")
     return jsonify({"status": "success"})
 
@@ -74,26 +95,8 @@ def api_stations():
     else:
         logger.info(f"📦 Using {len(cached_stations)} cached stations")
 
-    station_data = []
     logger.info(f"🚉 Processing stations for {len(cached_stations)} stations...")
-    for station in cached_stations:
-        walk_time = get_walk_time(station, browser_coordinates)
-        departures = get_inbound_trains(station)
-        processed_departures = process_station_departures(station, departures, browser_coordinates)
-
-        # Remove departure object reference before JSON serialization
-        station_departures = [{k: v for k, v in d.items() if k != "departure"} for d in processed_departures]
-
-        red_threshold, yellow_threshold = get_thresholds(walk_time) if walk_time is not None else (None, None)
-        station_data.append(
-            {
-                "name": station.name,
-                "distance": station.distance,
-                "walkTime": walk_time,
-                "departures": station_departures,
-                "timeConfig": {"buffer": red_threshold, "yellowThreshold": yellow_threshold},
-            }
-        )
+    station_data = [_station_board_row(s, browser_coordinates) for s in cached_stations]
     return jsonify({"stations": station_data, "config": config})
 
 
@@ -165,6 +168,7 @@ def api_esp32_image():
 
 
 def main():
+    logger.info(f"🚀 Starting server at http://localhost:{FLASK_PORT}")
     app.run(host="0.0.0.0", port=FLASK_PORT, debug=True)
 
 

@@ -5,6 +5,7 @@
     },
     "walk_time_buffer": 2,
     "location": { "latitude": 52.552045, "longitude": 13.399863 },
+    "max_nearby_straightline_m": 1500,
     "update_interval_min": 30,
     "min_departure_time_min": 5,
     "esp32-display": {
