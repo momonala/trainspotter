@@ -306,7 +306,16 @@ let resizeHandler = null;
 
 function renderStations(data) {
     if (!data?.stations?.length) {
-        console.error('Invalid station data:', data);
+        const container = document.getElementById('stations-container');
+        const navList = document.getElementById('station-nav-list');
+        if (navList) navList.innerHTML = '';
+        if (container) {
+            container.innerHTML = `
+                <div class="empty-state" role="status">
+                    <p>No nearby stations found.</p>
+                    <p>You may be outside the supported area (Berlin/Brandenburg).</p>
+                </div>`;
+        }
         return;
     }
 
@@ -521,10 +530,4 @@ window.addEventListener('DOMContentLoaded', async () => {
         }, CONFIG.RETRY_DELAY_MS);
     }
 
-    // Auto-refresh interval (don't refresh station list, only departures)
-    const updateInterval = setInterval(() => refreshData(false), CONFIG.REFRESH_INTERVAL_MS);
-    
-    window.addEventListener('unload', () => {
-        clearInterval(updateInterval);
-    });
 }); 

@@ -98,11 +98,11 @@ def get_nearby_stations(coordinates: tuple[float, float] | None = None) -> list[
     """Return the closest stops from the local snapshot within straight-line radius, S-Bahn first."""
     if coordinates is not None:
         lat, lon = coordinates
-        logger.info(f"📍 Using provided coordinates: {coordinates}")
+        logger.debug(f"📍 Using provided coordinates: {coordinates}")
     else:
         lat = config["location"]["latitude"]
         lon = config["location"]["longitude"]
-        logger.info(f"📍 Using config coordinates: ({lat}, {lon})")
+        logger.debug(f"📍 Using config coordinates: ({lat}, {lon})")
     nearest = _rank_stops_by_distance(_ALL_STATIONS, lat, lon, MAX_NEARBY_STATIONS, _MAX_STRAIGHTLINE_DISTANCE_M)
     station_dicts = [{**stop, "distance": int(round(meters))} for meters, stop in nearest]
     parsed = parse_stations(station_dicts)

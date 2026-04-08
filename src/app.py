@@ -91,9 +91,9 @@ def api_stations():
     # Get or refresh stations
     if cached_stations is None or refresh:
         cached_stations = get_nearby_stations(browser_coordinates)
-        logger.info(f"🔄 {'Refreshed' if refresh else 'Fetched'} {len(cached_stations)} stations")
+        logger.debug(f"🔄 {'Refreshed' if refresh else 'Fetched'} {len(cached_stations)} stations")
     else:
-        logger.info(f"📦 Using {len(cached_stations)} cached stations")
+        logger.debug(f"📦 Using {len(cached_stations)} cached stations")
 
     logger.info(f"🚉 Processing stations for {len(cached_stations)} stations...")
     station_data = [_station_board_row(s, browser_coordinates) for s in cached_stations]
