@@ -229,6 +229,34 @@ void setup() {
     appState.showingLiveView = true;
     appState.lastErrorType = ERR_SERVER_OTHER;
 
+    // Loop-based diagnostic to isolate whether prints are being lost.
+    // Loops 5 times printing 6 BUSY samples per loop. Total: 30 lines.
+    pinMode(EPD_BUSY, INPUT);
+    pinMode(EPD_RST, OUTPUT);
+    digitalWrite(EPD_RST, HIGH);
+    delay(100);
+
+    for (int loop = 0; loop < 5; loop++) {
+        Serial.print("LOOP ");
+        Serial.println(loop);
+        Serial.print("  pre-RST BUSY=");
+        Serial.println(digitalRead(EPD_BUSY));
+        digitalWrite(EPD_RST, LOW);
+        delay(20);
+        digitalWrite(EPD_RST, HIGH);
+        for (int t = 0; t < 5; t++) {
+            int delays[] = {2, 20, 100, 500, 1000};
+            delay(delays[t]);
+            Serial.print("  t=");
+            Serial.print(delays[t]);
+            Serial.print("ms BUSY=");
+            Serial.println(digitalRead(EPD_BUSY));
+        }
+        delay(1000);
+    }
+    Serial.println("DIAG DONE - halting before display.init()");
+    while(1) { delay(1000); }  // halt to capture all output
+
     display.init(115200, true);
     display.setRotation(0);
     display.setTextColor(GxEPD_BLACK);

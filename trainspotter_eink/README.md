@@ -5,7 +5,7 @@ ESP32 e-ink display for S-Bahn departures. Fetches a pre-rendered 400×300 PNG f
 ## Hardware
 
 - ESP32 (tested ESP32-32D-N4)
-- WeAct 4.2" e-ink display (400×300, GDEY042T81)
+- Waveshare 4.2" e-ink display V2 Rev 2.2 (400×300, UC8176/GDEW042M01)
 
 ## Pin Connections
 
@@ -13,12 +13,24 @@ ESP32 e-ink display for S-Bahn departures. Fetches a pre-rendered 400×300 PNG f
 |------------|-----------|----------|
 | VCC        | 3.3V      | Power |
 | GND        | GND       | Ground |
-| SDA        | GPIO 23   | SPI MOSI |
-| SCL        | GPIO 18   | SPI Clock |
+| DIN        | GPIO 23   | SPI MOSI |
+| CLK        | GPIO 18   | SPI Clock |
 | CS         | GPIO 5    | Chip Select |
-| D/C        | GPIO 17   | Data/Command |
-| Res        | GPIO 16   | Reset |
+| DC         | GPIO 17   | Data/Command |
+| RST        | GPIO 16   | Reset |
 | BUSY       | GPIO 4    | Busy |
+
+
+
+| BUSY       | GPIO 4    | Busy         | Purple |
+| RST        | GPIO 16   | Reset        | White  |
+| DC         | GPIO 17   | Data/Command | Green  |
+| CS         | GPIO 5    | Chip Select  | Orange |
+| CLK        | GPIO 18   | SPI Clock    | Yellow |
+| DIN        | GPIO 23   | SPI MOSI     | Blue   |
+| GND        | GND       | Ground       | Brown  |
+| VCC        | 3.3V      | Power        | Gray   |
+
 
 BOOT button (GPIO 0) toggles live view ↔ diagnostics screen.
 

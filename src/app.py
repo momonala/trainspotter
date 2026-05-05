@@ -105,7 +105,7 @@ def _fetch_esp32_departures(station_id: str, now: datetime, cache_key: str) -> t
     try:
         fresh_departures = get_inbound_trains_cached(station_id, cache_key) or []
         store_departures_snapshot(station_id, fresh_departures, now)
-        logger.info(f"🫧 esp32/image: using fresh departures station_id={station_id} count={len(fresh_departures)}")
+        logger.debug(f"🫧 esp32/image: using fresh departures station_id={station_id} count={len(fresh_departures)}")
         return fresh_departures, False
     except VBBAPIError:
         fallback_departures = get_fallback_departures(station_id, now)
@@ -114,7 +114,7 @@ def _fetch_esp32_departures(station_id: str, now: datetime, cache_key: str) -> t
             return None
 
         age = get_snapshot_age_hhmmss(station_id, now) or "no fallback available"
-        logger.info(f"⚠️ esp32/image: using stale departures fallback {age=} {len(fallback_departures)=}")
+        logger.debug(f"⚠️ esp32/image: using stale departures fallback {age=} {len(fallback_departures)=}")
         return fallback_departures, True
 
 
