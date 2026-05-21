@@ -15,7 +15,7 @@ const CONFIG = {
 };
 
 const TRANSPORT_LOGOS = {
-    'S-Bahn': 'https://upload.wikimedia.org/wikipedia/commons/thumb/e/e7/S-Bahn-Logo.svg/2048px-S-Bahn-Logo.svg.png',
+    'S-Bahn': 'https://upload.wikimedia.org/wikipedia/commons/thumb/e/e7/S-Bahn-Logo.svg/1920px-S-Bahn-Logo.svg.png',
     'U-Bahn': 'https://upload.wikimedia.org/wikipedia/commons/e/ee/U-Bahn_Berlin_logo.svg',
     'Tram': 'https://upload.wikimedia.org/wikipedia/commons/a/a6/Tram-Logo.svg',
     'Bus': 'https://upload.wikimedia.org/wikipedia/commons/thumb/8/83/BUS-Logo-BVG.svg/1024px-BUS-Logo-BVG.svg.png',
