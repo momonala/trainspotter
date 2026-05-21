@@ -1,4 +1,5 @@
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from datetime import timezone
 from pathlib import Path
@@ -56,6 +57,17 @@ def _station_board_row(station: Station, user_coords: tuple[float, float] | None
     }
 
 
+def _build_station_board_rows(
+    stations: list[Station],
+    user_coords: tuple[float, float] | None,
+) -> list[dict]:
+    """Fetch departures for all stations in parallel and build dashboard rows."""
+    if not stations:
+        return []
+    with ThreadPoolExecutor(max_workers=len(stations)) as executor:
+        return list(executor.map(lambda s: _station_board_row(s, user_coords), stations))
+
+
 @app.route("/")
 def index():
     """Render the main page."""
@@ -75,28 +87,25 @@ def api_location():
         round(latitude, COORDINATE_ACCURACY_DECIMALS),
         round(longitude, COORDINATE_ACCURACY_DECIMALS),
     )
-    logger.info(f"📍 Received location: {browser_coordinates}")
+    logger.info("[/api/location] %s", browser_coordinates)
     return jsonify({"status": "success"})
 
 
 @app.route("/api/stations")
 def api_stations():
     """Return station and train data as JSON."""
-    logger.info("----------------------------------------------------------")
     global browser_coordinates, cached_stations
-
-    # Check if refresh requested
     refresh = request.args.get("refresh", "false").lower() == "true"
+    max_stations = config.get("max_dashboard_stations")
 
-    # Get or refresh stations
     if cached_stations is None or refresh:
-        cached_stations = get_nearby_stations(browser_coordinates)
-        logger.debug(f"🔄 {'Refreshed' if refresh else 'Fetched'} {len(cached_stations)} stations")
+        nearby = get_nearby_stations(browser_coordinates)
+        cached_stations = nearby[:max_stations] if max_stations else nearby
+        logger.info("[/api/stations] %s %d stations", "Refreshed" if refresh else "Fetched", len(cached_stations))
     else:
-        logger.debug(f"📦 Using {len(cached_stations)} cached stations")
+        logger.info("[/api/stations] Using %d cached stations", len(cached_stations))
 
-    logger.info(f"🚉 Processing stations for {len(cached_stations)} stations...")
-    station_data = [_station_board_row(s, browser_coordinates) for s in cached_stations]
+    station_data = _build_station_board_rows(cached_stations, browser_coordinates)
     return jsonify({"stations": station_data, "config": config})
 
 
@@ -105,16 +114,22 @@ def _fetch_esp32_departures(station_id: str, now: datetime, cache_key: str) -> t
     try:
         fresh_departures = get_inbound_trains_cached(station_id, cache_key) or []
         store_departures_snapshot(station_id, fresh_departures, now)
-        logger.debug(f"🫧 esp32/image: using fresh departures station_id={station_id} count={len(fresh_departures)}")
+        logger.debug(
+            "[_fetch_esp32_departures] using fresh departures station_id=%s count=%d", station_id, len(fresh_departures)
+        )
         return fresh_departures, False
     except VBBAPIError:
         fallback_departures = get_fallback_departures(station_id, now)
         if fallback_departures is None:
-            logger.warning(f"❌ esp32/image: no fallback departures for station {station_id}")
+            logger.warning("[_fetch_esp32_departures] no fallback departures for station %s", station_id)
             return None
 
         age = get_snapshot_age_hhmmss(station_id, now) or "no fallback available"
-        logger.debug(f"⚠️ esp32/image: using stale departures fallback {age=} {len(fallback_departures)=}")
+        logger.debug(
+            "[_fetch_esp32_departures] using stale departures fallback age=%s len_fallback_departures=%d",
+            age,
+            len(fallback_departures),
+        )
         return fallback_departures, True
 
 
@@ -127,7 +142,7 @@ def _render_esp32_image(
 ) -> Response:
     """Render the e-ink PNG response from departures."""
     if not departures:
-        logger.warning(f"❌ esp32/image: no departures for station {station_id}")
+        logger.warning("[_render_esp32_image] no departures for station %s", station_id)
         station_name = display_config.get("station_name", "")
         display_time = now.astimezone(ZoneInfo("Europe/Berlin"))
         return Response(render_image([], station_name, display_time), mimetype="image/png")
@@ -141,7 +156,7 @@ def _render_esp32_image(
     station_name = display_config["station_name"]
     display_time = now.astimezone(ZoneInfo("Europe/Berlin"))
     img = render_image(quadrants_data, station_name, display_time)
-    logger.debug(f"📸 esp32/image: {station_id=} {cache_key=} size={len(img) / 1024:.1f}KB")
+    logger.debug("[_render_esp32_image] station_id=%s cache_key=%s size=%.1fKB", station_id, cache_key, len(img) / 1024)
     return Response(img, mimetype="image/png")
 
 
@@ -162,13 +177,13 @@ def api_esp32_image():
         departures, _used_fallback = fetch_result
         return _render_esp32_image(departures, now, station_id, cache_key, display_config)
     except Exception as error:
-        logger.exception(f"❌ esp32/image: failed to build response: {error}")
+        logger.exception("[/api/esp32/image] failed to build response: %s", error)
         error_response = jsonify({"error": "Image generation failed", "detail": str(error)})
         return make_response(error_response, 500)
 
 
 def main():
-    logger.info(f"🚀 Starting server at http://localhost:{FLASK_PORT}")
+    logger.info("[main] Starting server at http://localhost:%s", FLASK_PORT)
     app.run(host="0.0.0.0", port=FLASK_PORT, debug=True)
 
 

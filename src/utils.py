@@ -38,7 +38,11 @@ def _get_walk_time_gmaps(origin: tuple[float, float], destination: tuple[float, 
     duration_sec = result[0]["legs"][0]["duration"]["value"]
     duration_min = duration_sec / 60
     logger.info(
-        f"🚶🏽‍♂️ Google Maps walking time for {station_name}: {duration_min:.1f} minutes between {origin} and {destination}"
+        "[_get_walk_time_gmaps] Google Maps walking time for %s: %.1f minutes between %s and %s",
+        station_name,
+        duration_min,
+        origin,
+        destination,
     )
     return np.ceil(duration_min)
 
@@ -48,7 +52,7 @@ def get_walk_time(station: Station, current_coordinates: tuple[float, float] | N
     station_key = next((k for k in config["stations"].keys() if k in station.name.lower()), None)
     if station_key:
         walk_time = config["stations"][station_key]["walk_time"]
-        logger.debug(f"🚶🏽‍♂️ Station {station.name} is configured with walk time {walk_time} minutes")
+        logger.debug("[get_walk_time] Station %s is configured with walk time %d minutes", station.name, walk_time)
         return walk_time
     else:
         destination_coordinates = (round(station.location.latitude, 4), round(station.location.longitude, 4))

@@ -5,7 +5,7 @@
 // =============================================================================
 
 const CONFIG = {
-    FETCH_TIMEOUT_MS: 10000,
+    FETCH_TIMEOUT_MS: 20000,
     RETRY_DELAY_MS: 5000,
     REFRESH_INTERVAL_MS: 30000,
     LAST_UPDATED_INTERVAL_MS: 1000,
@@ -48,9 +48,16 @@ const lineBadgeCache = {};
 // API Functions
 // =============================================================================
 
+function describeFetchError(error, url) {
+    if (error?.name === 'TimeoutError' || error?.name === 'AbortError') {
+        return `timed out after ${CONFIG.FETCH_TIMEOUT_MS}ms url=${url}`;
+    }
+    return `${error?.name || 'Error'}: ${error?.message || error} url=${url}`;
+}
+
 async function fetchStations(refresh = false) {
+    const url = refresh ? '/api/stations?refresh=true' : '/api/stations';
     try {
-        const url = refresh ? '/api/stations?refresh=true' : '/api/stations';
         const resp = await fetch(url, {
             signal: AbortSignal.timeout(CONFIG.FETCH_TIMEOUT_MS)
         });
@@ -61,27 +68,27 @@ async function fetchStations(refresh = false) {
         state.config = data.config;
         return data;
     } catch (error) {
-        console.error('Error fetching stations:', error);
+        console.error(`Error fetching stations: ${describeFetchError(error, url)}`, error);
         throw error;
     }
 }
 
 async function updateLocation() {
     if (!('geolocation' in navigator)) return false;
-    
+
     try {
         const position = await new Promise((resolve, reject) => {
             navigator.geolocation.getCurrentPosition(resolve, reject);
         });
-        
-        await fetch('/api/location', {
+        const { latitude, longitude } = position.coords;
+        const resp = await fetch('/api/location', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                latitude: position.coords.latitude,
-                longitude: position.coords.longitude
-            })
+            body: JSON.stringify({ latitude, longitude })
         });
+        if (!resp.ok) {
+            throw new Error(`POST /api/location HTTP ${resp.status}`);
+        }
         return true;
     } catch (error) {
         console.error('Error getting location:', error);
@@ -450,7 +457,7 @@ window.addEventListener('DOMContentLoaded', async () => {
 
     async function refreshData(forceRefreshStations = false) {
         if (!refreshButton) return;
-        
+
         refreshButton.classList.add('spinning');
         try {
             // Pass refresh flag to control station list refresh
@@ -472,7 +479,6 @@ window.addEventListener('DOMContentLoaded', async () => {
 
     async function initialLoad() {
         try {
-            // Initial page load refreshes stations
             const data = await fetchStations(true);
             state.lastData = data;
             state.lastUpdatedAt = new Date();
@@ -511,9 +517,8 @@ window.addEventListener('DOMContentLoaded', async () => {
         }
     });
 
-    // Initial load
     await updateLocation();
-    
+
     if (!await initialLoad()) {
         const retrySec = CONFIG.RETRY_DELAY_MS / 1000;
         showError(container, `Error loading station data. Retrying in ${retrySec} seconds...<br>You can also refresh the page to try again.`);
