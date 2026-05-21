@@ -55,12 +55,22 @@ function describeFetchError(error, url) {
     return `${error?.name || 'Error'}: ${error?.message || error} url=${url}`;
 }
 
+function makeTimeoutSignal(ms) {
+    // AbortSignal.timeout() was added in Safari 16; iOS 15 only has Safari 15.
+    if (typeof AbortSignal.timeout === 'function') {
+        return { signal: AbortSignal.timeout(ms), cleanup: () => {} };
+    }
+    const controller = new AbortController();
+    const id = setTimeout(() => controller.abort(new DOMException('TimeoutError', 'TimeoutError')), ms);
+    return { signal: controller.signal, cleanup: () => clearTimeout(id) };
+}
+
 async function fetchStations(refresh = false) {
     const url = refresh ? '/api/stations?refresh=true' : '/api/stations';
+    const { signal, cleanup } = makeTimeoutSignal(CONFIG.FETCH_TIMEOUT_MS);
     try {
-        const resp = await fetch(url, {
-            signal: AbortSignal.timeout(CONFIG.FETCH_TIMEOUT_MS)
-        });
+        const resp = await fetch(url, { signal });
+        cleanup();
         if (!resp.ok) {
             throw new Error(`HTTP error! status: ${resp.status}`);
         }
@@ -68,6 +78,7 @@ async function fetchStations(refresh = false) {
         state.config = data.config;
         return data;
     } catch (error) {
+        cleanup();
         console.error(`Error fetching stations: ${describeFetchError(error, url)}`, error);
         throw error;
     }
