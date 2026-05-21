@@ -30,7 +30,6 @@ def _clear_departure_snapshots() -> None:
 @pytest.fixture
 def client():
     app.config["TESTING"] = True
-
     app_module.browser_coordinates = None
     app_module.cached_stations = None
     _clear_departure_snapshots()
@@ -120,17 +119,6 @@ def departure_factory(test_station: Station, suburban_line: Line):
 
 
 @pytest.fixture
-def esp32_image_response_with_mocked_time(client):
-    def _request(first_now: datetime, second_now: datetime):
-        with freeze_time(first_now):
-            client.get("/api/esp32/image")
-        with freeze_time(second_now):
-            return client.get("/api/esp32/image")
-
-    return _request
-
-
-@pytest.fixture
 def stations_api_departure() -> Mock:
     mock_location = Mock(latitude=52.5, longitude=13.4)
     mock_destination = Mock(location=mock_location)
@@ -154,6 +142,11 @@ def stations_api_station() -> Mock:
     station.distance = 100
     station.location = Mock(latitude=location.latitude, longitude=location.longitude)
     return station
+
+
+# =============================================================================
+# Index / main dashboard
+# =============================================================================
 
 
 def test_index_route(client):
@@ -200,69 +193,77 @@ def test_api_stations_returns_json(
     assert "config" in data
 
 
-@patch("src.app.render_image", return_value=b"fake-png")
+# =============================================================================
+# /display page
+# =============================================================================
+
+
+def test_display_route_renders_html(client):
+    response = client.get("/display")
+    assert response.status_code == 200
+    assert b"<!DOCTYPE html>" in response.data or b"<html" in response.data
+
+
+# =============================================================================
+# /api/display/data
+# =============================================================================
+
+
+@patch("src.app.filter_and_group", return_value=[])
+@patch("src.app.get_inbound_trains_cached", return_value=[])
+def test_api_display_data_returns_expected_shape(mock_trains, mock_filter, client):
+    response = client.get("/api/display/data")
+    assert response.status_code == 200
+    data = response.get_json()
+    assert "station_name" in data
+    assert "timestamp" in data
+    assert "used_fallback" in data
+    assert "quadrants" in data
+    assert isinstance(data["quadrants"], list)
+
+
+@patch("src.app.filter_and_group", return_value=[])
+@patch("src.app.get_inbound_trains_cached", return_value=[])
+def test_api_display_data_used_fallback_false_on_fresh_data(mock_trains, mock_filter, client):
+    response = client.get("/api/display/data")
+    assert response.status_code == 200
+    assert response.get_json()["used_fallback"] is False
+
+
 @patch("src.app.filter_and_group", return_value=[])
 @patch("src.app.get_inbound_trains_cached")
-def test_api_esp32_image_uses_stale_fallback_on_vbb_error(
+def test_api_display_data_used_fallback_true_when_stale(
     mock_get_trains,
-    _mock_filter,
-    _mock_render,
+    mock_filter,
     client,
     base_now_utc,
     departure_factory,
 ):
-    fresh_departure = departure_factory(base_now_utc, minutes_until=16)
-    mock_get_trains.side_effect = [[fresh_departure], VBBAPIError("downstream unavailable")]
+    fresh = departure_factory(base_now_utc, minutes_until=16)
+    mock_get_trains.side_effect = [[fresh], VBBAPIError("downstream unavailable")]
 
     with freeze_time(base_now_utc):
-        first = client.get(f"/api/esp32/image?station_id={TEST_STATION_ID}")
+        client.get(f"/api/display/data?station_id={TEST_STATION_ID}")
     with freeze_time(base_now_utc + timedelta(seconds=20)):
-        second = client.get(f"/api/esp32/image?station_id={TEST_STATION_ID}")
-
-    assert first.status_code == 200
-    assert second.status_code == 200
-    assert second.mimetype == "image/png"
-
-
-@patch("src.app.render_image", return_value=b"fake-png")
-@patch("src.app.filter_and_group", return_value=[])
-@patch("src.app.get_inbound_trains_cached")
-def test_api_esp32_image_returns_200_when_unpassed_stale_data_exists(
-    mock_get_trains,
-    _mock_filter,
-    _mock_render,
-    esp32_image_response_with_mocked_time,
-    base_now_utc,
-    departure_factory,
-):
-    nearly_expired_departure = departure_factory(base_now_utc, minutes_until=6)
-    mock_get_trains.side_effect = [[nearly_expired_departure], VBBAPIError("downstream unavailable")]
-
-    response = esp32_image_response_with_mocked_time(
-        first_now=base_now_utc,
-        second_now=base_now_utc + timedelta(minutes=1),
-    )
+        response = client.get(f"/api/display/data?station_id={TEST_STATION_ID}")
 
     assert response.status_code == 200
+    assert response.get_json()["used_fallback"] is True
 
 
-@patch("src.app.render_image", return_value=b"fake-png")
-@patch("src.app.filter_and_group", return_value=[])
 @patch("src.app.get_inbound_trains_cached")
-def test_api_esp32_image_returns_502_when_all_stale_departures_are_passed(
+def test_api_display_data_returns_502_when_no_fallback_available(
     mock_get_trains,
-    _mock_filter,
-    _mock_render,
-    esp32_image_response_with_mocked_time,
+    client,
     base_now_utc,
     departure_factory,
 ):
     short_departure = departure_factory(base_now_utc, minutes_until=1)
     mock_get_trains.side_effect = [[short_departure], VBBAPIError("downstream unavailable")]
 
-    response = esp32_image_response_with_mocked_time(
-        first_now=base_now_utc,
-        second_now=base_now_utc + timedelta(minutes=2),
-    )
+    with freeze_time(base_now_utc):
+        client.get(f"/api/display/data?station_id={TEST_STATION_ID}")
+    with freeze_time(base_now_utc + timedelta(minutes=2)):
+        response = client.get(f"/api/display/data?station_id={TEST_STATION_ID}")
 
     assert response.status_code == 502

@@ -1,0 +1,573 @@
+/* ============================================================
+   Trainspotter Display — Apple Liquid Glass aesthetic
+   Landscape iPad optimised, full viewport, no scroll.
+   Relies on styles.css being loaded first for .line-* badges.
+   ============================================================ */
+
+/* ── Reset & base ─────────────────────────────────────────── */
+
+*,
+*::before,
+*::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+:root {
+    /* Palette */
+    --d-bg:             #07070e;
+    --d-glass-bg:       rgba(255, 255, 255, 0.055);
+    --d-glass-border:   rgba(255, 255, 255, 0.10);
+    --d-glass-shine:    rgba(255, 255, 255, 0.06);
+    --d-divider:        rgba(255, 255, 255, 0.08);
+    --d-grid-divider:   #ffffff;
+    --d-header-bg:      rgba(14, 14, 26, 0.72);
+
+    /* Text */
+    --d-text:           rgba(255, 255, 255, 0.94);
+    --d-text-secondary: rgba(255, 255, 255, 0.50);
+    --d-text-tertiary:  rgba(255, 255, 255, 0.30);
+
+    /* Accent */
+    --d-stale-color:    rgba(255, 185, 40, 0.90);
+    --d-stale-bg:       rgba(255, 185, 40, 0.12);
+    --d-stale-border:   rgba(255, 185, 40, 0.30);
+    --d-error-color:    rgba(255, 80, 80, 0.85);
+
+    /* Sizing */
+    --d-header-h:       52px;
+    --d-radius-card:    0px;    /* quadrants share full-bleed edges */
+    --d-radius-badge:   18px;
+    --d-radius-chip:    8px;
+
+    /* Type */
+    --d-font: -apple-system, 'SF Pro Display', BlinkMacSystemFont,
+              'Helvetica Neue', Arial, sans-serif;
+}
+
+html,
+body {
+    width: 100%;
+    height: 100dvh;
+    overflow: hidden;
+    background: var(--d-bg);
+    color: var(--d-text);
+    font-family: var(--d-font);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+/* Ambient background radial gradients — gives depth without distracting from data */
+body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background:
+        radial-gradient(ellipse 70% 55% at 15% 35%, rgba(25, 55, 130, 0.28) 0%, transparent 65%),
+        radial-gradient(ellipse 55% 45% at 85% 75%, rgba(70, 20, 110, 0.22) 0%, transparent 60%);
+    pointer-events: none;
+    z-index: 0;
+}
+
+/* ── Wrapper ──────────────────────────────────────────────── */
+
+.display-wrapper {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    flex-direction: column;
+    height: 100dvh;
+}
+
+/* ── Header ───────────────────────────────────────────────── */
+
+.display-header {
+    /* auto height so iOS safe-area inset can expand it */
+    flex: 0 0 auto;
+    min-height: var(--d-header-h);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    /* Push below iOS system bar; safe-area-inset-top is 0 in regular Safari,
+       non-zero when added to home screen or when viewport-fit=cover is active */
+    padding: calc(env(safe-area-inset-top, 0px) + 8px) 20px 8px;
+    background: var(--d-header-bg);
+    backdrop-filter: blur(24px) saturate(1.4);
+    -webkit-backdrop-filter: blur(24px) saturate(1.4);
+    border-bottom: 1px solid var(--d-divider);
+}
+
+.station-title {
+    font-size: 17px;
+    font-weight: 600;
+    letter-spacing: -0.2px;
+    color: var(--d-text);
+}
+
+.header-right {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+}
+
+.stale-badge {
+    display: none;
+    align-items: center;
+    padding: 3px 10px;
+    background: var(--d-stale-bg);
+    border: 1px solid var(--d-stale-border);
+    border-radius: 20px;
+    color: var(--d-stale-color);
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.2px;
+}
+
+.stale-badge.visible {
+    display: flex;
+}
+
+.header-time {
+    font-size: 15px;
+    font-weight: 400;
+    color: var(--d-text-secondary);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.1px;
+}
+
+/* Last-updated ticker — red, after the clock */
+.last-updated-ago {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--d-error-color);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.2px;
+    white-space: nowrap;
+}
+
+/* Mute / unmute icon button */
+.icon-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 4px 8px;
+    border: 1px solid var(--d-glass-border);
+    border-radius: 8px;
+    background: var(--d-glass-bg);
+    color: var(--d-text-secondary);
+    cursor: pointer;
+    line-height: 1;
+    transition: background 0.15s ease, color 0.15s ease;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.icon-button:hover  { background: rgba(255, 255, 255, 0.12); color: var(--d-text); }
+.icon-button:active { transform: scale(0.93); }
+
+/* Icon swap — only one SVG visible at a time */
+.icon-button .icon-sound-off { display: none; }
+.icon-button.muted .icon-sound-on  { display: none; }
+.icon-button.muted .icon-sound-off { display: block; }
+.icon-button.muted { color: var(--d-error-color); border-color: rgba(255, 59, 48, 0.45); }
+
+/* Nav link — jump back to dashboard */
+.display-nav-link {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--d-text-secondary);
+    font-size: 17px;
+    line-height: 1;
+    padding: 4px 8px;
+    border: 1px solid var(--d-glass-border);
+    border-radius: 8px;
+    text-decoration: none;
+    background: var(--d-glass-bg);
+    transition: background 0.15s ease, color 0.15s ease;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.display-nav-link:hover {
+    background: rgba(255, 255, 255, 0.12);
+    color: var(--d-text);
+}
+
+.display-nav-link:active {
+    transform: scale(0.93);
+}
+
+/* ── 2×2 grid ─────────────────────────────────────────────── */
+
+.display-grid {
+    flex: 1;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: 1fr 1fr;
+    /* 1px gap acts as divider lines; grid background provides the colour */
+    gap: 1px;
+    background: var(--d-grid-divider);
+    overflow: hidden;
+    min-height: 0;
+}
+
+/* ── Quadrant cards ───────────────────────────────────────── */
+
+.quadrant {
+    background: var(--d-bg);
+    display: flex;
+    flex-direction: column;
+    /* tight padding — let badges own the space */
+    padding: 6px 8px 4px;
+    gap: 0;
+    position: relative;
+    overflow: hidden;
+    box-shadow: inset 0 1px 0 var(--d-glass-shine);
+    transition: background 0.3s ease;
+}
+
+.quadrant--loading {
+    align-items: center;
+    justify-content: center;
+}
+
+/* ── Quadrant header ──────────────────────────────────────── */
+
+.quadrant-header {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    flex: 0 0 auto;
+}
+
+/* Arrow and label are the same weight — prominent, readable from far away */
+.quadrant-arrow {
+    font-size: 106px;
+    font-weight: 700;
+    line-height: 1;
+    color: var(--d-text);
+    font-family: 'SF Pro Display', -apple-system, sans-serif;
+}
+
+.quadrant-label {
+    font-size: 106px;
+    font-weight: 700;
+    letter-spacing: -2px;
+    color: var(--d-text);
+}
+
+/* ── Departures row ───────────────────────────────────────── */
+
+.departures-row {
+    display: flex;
+    flex: 1;
+    align-items: stretch;
+    gap: 8px;
+    padding-top: 4px;
+    min-height: 0;
+}
+
+/* ── Individual departure badge ───────────────────────────── */
+
+.departure-badge {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    align-self: center;
+    gap: 9px;
+    padding: 4.5px 5px;
+    background: var(--d-glass-bg);
+    border: 1px solid var(--d-glass-border);
+    border-radius: var(--d-radius-badge);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.10),
+                0 4px 24px rgba(0, 0, 0, 0.35);
+    flex: 1 1 auto;
+    min-width: 80px;
+    max-width: 200px;
+    cursor: pointer;
+    /* 3D flip-in — origin just above centre so the card "falls" into place */
+    transform-origin: center 40%;
+    backface-visibility: hidden;
+    animation: flipIn 0.63s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+    transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+
+.departure-badge:active {
+    transform: scale(0.94);
+}
+
+/* Split-flap flip: card sweeps in from above, decelerates like a mechanical latch */
+@keyframes flipIn {
+    0% {
+        transform: perspective(900px) rotateX(-88deg);
+        opacity: 0;
+        box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 2px 8px rgba(0,0,0,0.6);
+    }
+    45% {
+        opacity: 1;
+    }
+    100% {
+        transform: perspective(900px) rotateX(0deg);
+        opacity: 1;
+        box-shadow: inset 0 1px 0 rgba(255,255,255,0.10), 0 4px 24px rgba(0,0,0,0.35);
+    }
+}
+
+/* Clock time — above the countdown */
+.departure-clock {
+    flex: 0 0 auto;
+    font-size: 16px;
+    font-weight: 400;
+    color: var(--d-text-tertiary);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.4px;
+    line-height: 1;
+    text-align: center;
+}
+
+/* Minutes — the hero number */
+.departure-minutes {
+    flex: 0 0 auto;
+    font-size: 96px;
+    font-weight: 700;
+    line-height: 1;
+    letter-spacing: -3px;
+    color: var(--d-text);
+    font-variant-numeric: tabular-nums;
+    text-align: center;
+}
+
+/* Line chip — BVG colour, reuses .line-S1 etc from styles.css */
+.departure-line-chip {
+    flex: 0 0 auto;
+    font-size: 26px !important;
+    font-weight: 700 !important;
+    padding: 4px 12px !important;
+    border-radius: var(--d-radius-chip) !important;
+    letter-spacing: 0.1px;
+    min-width: 0 !important;
+    white-space: nowrap;
+}
+
+/* ── Empty quadrant (dash) ────────────────────────────────── */
+
+.departure-empty {
+    font-size: 42px;
+    font-weight: 200;
+    color: var(--d-text-tertiary);
+    letter-spacing: 2px;
+    padding-left: 4px;
+}
+
+/* ── Error state — full-grid card ─────────────────────────── */
+
+.error-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    background: var(--d-bg);
+    text-align: center;
+    padding: 32px;
+}
+
+.error-card__icon {
+    font-size: 48px;
+    line-height: 1;
+    color: var(--d-error-color);
+}
+
+.error-card__title {
+    font-size: 22px;
+    font-weight: 600;
+    color: var(--d-error-color);
+    letter-spacing: -0.3px;
+}
+
+.error-card__sub {
+    font-size: 14px;
+    font-weight: 400;
+    color: var(--d-text-tertiary);
+    letter-spacing: 0.2px;
+}
+
+/* ── Loading pulse ────────────────────────────────────────── */
+
+.loading-pulse {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: var(--d-glass-bg);
+    border: 1px solid var(--d-glass-border);
+    animation: loadingPulse 1.4s ease-in-out infinite;
+}
+
+@keyframes loadingPulse {
+    0%, 100% { opacity: 0.25; transform: scale(0.9); }
+    50%       { opacity: 0.70; transform: scale(1.05); }
+}
+
+/* ── Landscape-specific adjustments ──────────────────────── */
+
+/* ── Zoom modal ───────────────────────────────────────────── */
+
+.modal-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 200;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.55);
+    backdrop-filter: blur(22px) saturate(0.75);
+    -webkit-backdrop-filter: blur(22px) saturate(0.75);
+    cursor: pointer;
+    animation: overlayFadeIn 0.25s ease both;
+}
+
+.modal-overlay[hidden] { display: none; }
+
+.modal-overlay.closing {
+    animation: overlayFadeOut 0.2s ease both;
+}
+
+@keyframes overlayFadeIn {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+}
+
+@keyframes overlayFadeOut {
+    to { opacity: 0; }
+}
+
+.modal-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 24px;
+    padding: 56px 80px;
+    background: rgba(255, 255, 255, 0.07);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 40px;
+    backdrop-filter: blur(28px);
+    -webkit-backdrop-filter: blur(28px);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14),
+                0 28px 90px rgba(0, 0, 0, 0.70);
+    cursor: default;
+    animation: cardZoomIn 0.38s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+
+@keyframes cardZoomIn {
+    from { transform: scale(0.6); opacity: 0; }
+    to   { transform: scale(1);   opacity: 1; }
+}
+
+/* Hero countdown in the modal */
+.modal-minutes {
+    font-size: 180px;
+    font-weight: 700;
+    line-height: 1;
+    letter-spacing: -4px;
+    color: var(--d-text);
+    font-variant-numeric: tabular-nums;
+    transition: color 0.4s ease;
+}
+
+/* Arrow + chip on the same row */
+.modal-chip-row {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+}
+
+.modal-arrow {
+    font-size: 64px;
+    font-weight: 700;
+    line-height: 1;
+    color: var(--d-text);
+    font-family: 'SF Pro Display', -apple-system, sans-serif;
+}
+
+/* BVG line chip — inherits colour from .line-S1 etc */
+.modal-line-chip {
+    font-size: 52px !important;
+    font-weight: 700 !important;
+    padding: 10px 28px !important;
+    border-radius: 16px !important;
+    min-width: 0 !important;
+    letter-spacing: 0.2px;
+    white-space: nowrap;
+}
+
+.modal-clock {
+    font-size: 40px;
+    font-weight: 300;
+    color: var(--d-text-tertiary);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 1px;
+}
+
+/* ── Urgent badge (≤ 7 min) — main grid, no alarm ────────── */
+.departure-badge.urgent .departure-minutes {
+    color: var(--d-error-color);
+    animation: alarmPulse 1.6s ease-in-out infinite;
+}
+
+/* Alarm — pulsing red when countdown hits 7 min */
+.modal-card.alarming {
+    border-color: rgba(255, 59, 48, 0.55);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14),
+                0 28px 90px rgba(0, 0, 0, 0.70),
+                0 0 48px rgba(255, 59, 48, 0.45);
+    animation: cardAlarmBorder 1.0s ease-in-out infinite;
+}
+
+.modal-card.alarming .modal-minutes {
+    color: var(--d-error-color);
+    animation: alarmPulse 0.8s ease-in-out infinite;
+}
+
+@keyframes alarmPulse {
+    0%, 100% { opacity: 1;    transform: scale(1);     }
+    50%       { opacity: 0.55; transform: scale(0.96); }
+}
+
+@keyframes cardAlarmBorder {
+    0%, 100% { box-shadow: inset 0 1px 0 rgba(255,255,255,0.14),
+                            0 28px 90px rgba(0,0,0,0.70),
+                            0 0 48px rgba(255, 59, 48, 0.45); }
+    50%       { box-shadow: inset 0 1px 0 rgba(255,255,255,0.14),
+                            0 28px 90px rgba(0,0,0,0.70),
+                            0 0 80px rgba(255, 59, 48, 0.80); }
+}
+
+/* ── Landscape-specific adjustments ──────────────────────── */
+
+/* Very short landscape (e.g. iPhone landscape) */
+@media (orientation: landscape) and (max-height: 500px) {
+    :root { --d-header-h: 36px; }
+
+    .departure-minutes { font-size: 53px; letter-spacing: -2px; }
+    .departure-line-chip { font-size: 14px !important; padding: 2px 7px !important; }
+    .departure-badge { padding: 3px 4px; gap: 6px; max-width: 140px; }
+    .quadrant { padding: 4px 6px 4px; }
+    .quadrant-label { font-size: 44px; }
+    .quadrant-arrow { font-size: 44px; }
+    .departure-clock { font-size: 11px; }
+    .departures-row { gap: 6px; padding-top: 2px; }
+}
+
+/* Larger landscape (iPad Pro / desktop preview) */
+@media (orientation: landscape) and (min-height: 900px) {
+    .departure-minutes { font-size: 115px; }
+    .departure-line-chip { font-size: 32px !important; padding: 5px 16px !important; }
+    .departure-badge { max-width: 230px; padding: 6px 6px; gap: 10px; }
+    .quadrant { padding: 8px 12px 6px; }
+    .quadrant-label { font-size: 128px; }
+    .quadrant-arrow { font-size: 128px; }
+    .departure-clock { font-size: 18px; }
+}

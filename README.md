@@ -3,7 +3,7 @@
 [![CI](https://github.com/momonala/trainspotter/actions/workflows/ci.yml/badge.svg)](https://github.com/momonala/trainspotter/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/momonala/trainspotter/branch/main/graph/badge.svg)](https://codecov.io/gh/momonala/trainspotter)
 
-Flask web app that shows departure boards for nearby Berlin VBB stops, color-coded by whether you have time to walk there. Optionally renders a 1-bit PNG for an ESP32 e-ink display showing departures at a fixed station.
+Flask web app that shows departure boards for nearby Berlin VBB stops, colour-coded by whether you have time to walk there. A second, fixed-station display renders a landscape 2×2 quadrant board for an always-on iPad mini.
 
 ---
 
@@ -16,25 +16,23 @@ trainspotter/
 │   ├── vbb_api.py              # Station snapshot loading, haversine ranking, VBB departures client (LRU cache)
 │   ├── utils.py                # Walk time lookup, threshold calc, direction/provenance cleansing, Google Maps cache
 │   ├── datamodels.py           # Dataclasses: Station, Departure, Line, Location, Products, Color, Operator
-│   ├── image_generator.py      # ESP32: filter departures by quadrant, render 400×300 1-bit PNG
-│   ├── departures_fallback.py  # In-memory snapshot fallback for ESP32 when VBB is unreachable
+│   ├── quadrants.py            # Filter departures by quadrant config, group into QuadrantData
+│   ├── departures_fallback.py  # In-memory snapshot fallback for display when VBB is unreachable
 │   ├── config.py               # Typed config accessors (reads pyproject.toml + config.json); exposes FLASK_PORT
 │   ├── trainspotter.py         # CLI terminal view (standalone, no server)
 │   └── values.example.py       # Template for values.py (git-ignored); set GMAPS_API_KEY here
 ├── data/
 │   └── vbb_stations.json       # Static stop snapshot (~thousands of stops); regenerate with scripts/fetch_stations.py
 ├── scripts/
-│   ├── fetch_stations.py       # Builds vbb_stations.json via VBB /locations/nearby grid sweep
-│   └── test_image_render.py    # Dev script to preview ESP32 image output
+│   └── fetch_stations.py       # Builds vbb_stations.json via VBB /locations/nearby grid sweep
 ├── static/
-│   ├── app.js                  # Frontend: geolocation, polling, departure rendering, filter controls
-│   └── styles.css              # BVG/VBB line colours
+│   ├── app.js                  # Main dashboard: geolocation, polling, departure rendering, filter controls
+│   ├── display.js              # Display page: quadrant rendering, 30s polling, zoom modal, alarm engine
+│   ├── styles.css              # BVG/VBB line colours and main dashboard styles
+│   └── display.css             # Display page: Apple Liquid Glass aesthetic, landscape 2×2 grid
 ├── templates/
-│   └── index.html              # Main page template
-├── trainspotter_eink/          # ESP32 firmware (Arduino)
-│   ├── trainspotter_eink.ino
-│   ├── config.h                # WiFi credentials, station ID, server URL (copy from config.example.h)
-│   └── README.md               # Hardware wiring, build, and upload instructions
+│   ├── index.html              # Main dashboard page
+│   └── display.html            # iPad display page
 ├── install/
 │   ├── install.sh              # Raspberry Pi deployment: uv install + systemd + optional Cloudflare tunnel
 │   └── projects_trainspotter.service  # systemd unit file
@@ -80,6 +78,7 @@ flowchart TB
     Api[app.py endpoints]
     VbbMod[vbb_api.py]
     Utils[utils.py]
+    Quadrants[quadrants.py]
     Fallback[departures_fallback.py]
   end
 
@@ -89,22 +88,24 @@ flowchart TB
   end
 
   subgraph client [Browser]
-    Js[app.js]
-    Page[index.html]
+    Dashboard[app.js / index.html]
+    Display[display.js / display.html]
   end
 
   Config --> Api
   Config --> Utils
   Snapshot -->|loaded at import| VbbMod
-  Js -->|POST coords| Api
-  Js -->|GET stations| Api
+  Dashboard -->|POST coords| Api
+  Dashboard -->|GET stations| Api
+  Display -->|GET display/data| Api
   Api --> VbbMod
   Api --> Utils
+  Api --> Quadrants
   VbbMod -->|LRU cached per station/30s window| VBBdep
   VbbMod -->|on VBBAPIError| Fallback
   Utils -->|walk time if not in config| GMaps
-  Api -->|JSON| Js
-  Js --> Page
+  Api -->|JSON| Dashboard
+  Api -->|JSON| Display
 ```
 
 ---
@@ -146,9 +147,31 @@ sequenceDiagram
   end
 ```
 
-### ESP32 image flow
+### Display request flow
 
-`GET /api/esp32/image` bypasses the nearby-stop logic entirely. It uses the fixed `station_id` from `config.json["esp32-display"]`, fetches departures (with in-memory fallback from `departures_fallback.py` on `VBBAPIError`), groups them into four quadrants, and renders a 400×300 1-bit PNG.
+`GET /display` serves a full-viewport landscape HTML page. JavaScript polls `GET /api/display/data` every 30 seconds. The endpoint uses the fixed `station_id` from `config.json["display"]`, fetches departures (with in-memory fallback from `departures_fallback.py` on `VBBAPIError`), groups them into four quadrants, and returns JSON. The page renders a 2×2 quadrant grid with Apple Liquid Glass styling optimised for iPad mini in landscape mode.
+
+When stale fallback data is served, the response includes `"used_fallback": true` and the display shows a ⚠ indicator in the header.
+
+### Display page interactions
+
+Departure badges are interactive. Tapping one opens a full-screen zoom modal showing the live countdown, direction arrow, and BVG line chip.
+
+**Alarm thresholds (zoom modal only):**
+
+| Threshold | Behaviour |
+|-----------|-----------|
+| ≤ 7 min | Alarm sounds (Web Audio API) + red pulse animation. Fires once when countdown crosses 7, then repeats every 1.8 s. |
+| ≤ 5 min | Modal auto-dismisses — returns to the quadrant grid. |
+| 60 s after alarm start | Alarm auto-stops (prevents indefinite noise if user walks away). |
+
+**Urgent state (main grid):** Badges at ≤ 7 min pulse their minutes number red — no alarm, purely visual.
+
+**Mute button:** The speaker icon in the header mutes/unmutes the alarm. State persists in `localStorage` (`alarmMuted`).
+
+**iOS audio note:** `AudioContext` on iOS Safari starts suspended and can only be unlocked inside a user-gesture handler. `unlockAudio()` is called at the top of `openZoom()` (which runs in a tap handler) to ensure the context is running before any scheduled alarm. Do not attempt to play audio from a timer or interval without first having called `unlockAudio()` during a touch event.
+
+**Minutes accuracy:** The server returns integer minutes (floor value). The zoom modal offsets the departure timestamp by +59 s so the initial countdown display always matches what the badge showed, rather than appearing one minute lower on open.
 
 ---
 
@@ -200,11 +223,11 @@ Flask port is set in `pyproject.toml` under `[tool.config]`.
 | `max_dashboard_stations` | No | int | Caps the number of stops shown on the dashboard. No limit if absent. |
 | `update_interval_min` | Yes | int (minutes) | VBB `duration` query param — fetch departures within this window. |
 | `min_departure_time_min` | Yes | int (minutes) | Hide departures with fewer than this many minutes remaining. |
-| `esp32-display.station_id` | Yes (e-ink) | str | VBB stop ID used by `GET /api/esp32/image`. |
-| `esp32-display.station_name` | Yes (e-ink) | str | Display name rendered on the e-ink image header. |
-| `esp32-display.quadrants` | Yes (e-ink) | list[4] | Exactly 4 entries. Each: `key` (str), `label` (str), `lines` (list[str]), `direction` (arrow symbol). Order: top-left, top-right, bottom-left, bottom-right. |
+| `display.station_id` | Yes (display) | str | VBB stop ID used by `GET /api/display/data`. |
+| `display.station_name` | Yes (display) | str | Display name shown in the header of the display page. |
+| `display.quadrants` | Yes (display) | list[4] | Exactly 4 entries. Each: `key` (str), `label` (str), `lines` (list[str]), `direction` (arrow symbol). Order: top-left, top-right, bottom-left, bottom-right. |
 
-**Direction symbols** for quadrant `direction`: `↑ ↓ ← → ↻ ↺` (↻/↺ map to S41/S42 ring direction logic in `utils.get_direction`).
+**Direction symbols** for quadrant `direction`: `↑ ↓ ← → ↻ ↺` (↻/↺ map to S41/S42 ring direction logic in `quadrants.compute_direction`).
 
 ---
 
@@ -213,9 +236,10 @@ Flask port is set in `pyproject.toml` under `[tool.config]`.
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/` | GET | Main dashboard page |
+| `/display` | GET | iPad landscape display page (2×2 quadrant board) |
 | `/api/location` | POST | Set server-side browser coordinates `{latitude, longitude}` |
 | `/api/stations` | GET | Nearby stops with live departures. `?refresh=true` re-resolves stop list. |
-| `/api/esp32/image` | GET | 400×300 1-bit PNG. `?station_id=<VBB_ID>` overrides config. Returns 502 if VBB fails and no fallback exists. |
+| `/api/display/data` | GET | Quadrant departure data for the fixed display station. Returns 502 if VBB fails and no fallback exists. |
 
 ### `GET /api/stations` response shape
 
@@ -246,19 +270,30 @@ Flask port is set in `pyproject.toml` under `[tool.config]`.
 }
 ```
 
-`wait_time = minutes_until_departure − walk_time`. Negative means the train can't be caught.
+### `GET /api/display/data` response shape
 
-### Color threshold logic
+```json
+{
+  "station_name": "Bornholmerstr",
+  "timestamp": "2026-05-21T10:36:00+02:00",
+  "used_fallback": false,
+  "quadrants": [
+    {
+      "label": "S1/26",
+      "arrow": "↑",
+      "departures": [
+        { "minutes": 7,  "line": "S1"  },
+        { "minutes": 14, "line": "S26" }
+      ]
+    },
+    { "label": "S1/26", "arrow": "↓", "departures": [] },
+    { "label": "S8/85", "arrow": "↑", "departures": [{ "minutes": 11, "line": "S8" }] },
+    { "label": "S8/85", "arrow": "↻", "departures": [] }
+  ]
+}
+```
 
-`timeConfig.buffer` and `timeConfig.yellowThreshold` are derived from `walk_time ± walk_time_buffer`.
-
-For `walk_time=15`, `walk_time_buffer=2`:
-
-| Colour | Condition |
-|--------|-----------|
-| Red | `wait_time < 13` |
-| Yellow | `13 ≤ wait_time ≤ 17` |
-| Green | `wait_time > 17` |
+`used_fallback: true` means VBB was unreachable and time-shifted stale departures are being served. The display page shows a ⚠ stale-data badge in this case.
 
 ### `transport_type` normalisation
 
@@ -315,21 +350,6 @@ Departure
 - Walking mode only; used when a station has no `walk_time` in `config.json`.
 - Results are joblib disk-cached in `.cache/` (keyed by origin + destination coordinates).
 - Requires `GMAPS_API_KEY` in `src/values.py`.
-
----
-
-## E-ink display (ESP32)
-
-An ESP32 + 4.2" e-ink (WeAct GDEY042T81, 400×300) fetches `GET /api/esp32/image`, renders the PNG, and deep-sleeps between updates.
-
-Configure in `config.json["esp32-display"]`:
-- `station_id`: VBB stop ID
-- `station_name`: header text on the image
-- `quadrants`: 4 entries specifying which lines and directions fill each quadrant
-
-If the VBB API is unreachable, `departures_fallback.py` shifts the last successful departure times forward by the elapsed age and returns whichever are still in the future.
-
-Firmware, wiring, and upload instructions: [`trainspotter_eink/README.md`](trainspotter_eink/README.md).
 
 ---
 

@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="description" content="Trainspotter departure display">
+    <title>Trainspotter Display</title>
+    <!-- styles.css provides .line-* badge colours reused by display.js -->
+    <link rel="stylesheet" href="/static/styles.css?v={{ asset_version }}">
+    <link rel="stylesheet" href="/static/display.css?v={{ asset_version }}">
+</head>
+<body>
+    <div class="display-wrapper">
+        <header class="display-header">
+            <span class="station-title" id="station-title" aria-label="Station name">—</span>
+            <div class="header-right">
+                <span class="stale-badge" id="stale-badge" role="status" aria-live="polite">
+                    ⚠&thinsp;stale data
+                </span>
+                <time class="header-time" id="header-time" aria-label="Current time"></time>
+                <span class="last-updated-ago" id="last-updated-ago" aria-live="polite"></span>
+                <button id="mute-btn" class="icon-button" aria-label="Mute alarm" aria-pressed="false">
+                    <!-- speaker.wave.2 — shown when unmuted -->
+                    <svg class="icon-sound-on" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M11 5 6 9H3v6h3l5 4V5z"/>
+                        <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
+                        <path d="M18.36 5.64a9 9 0 0 1 0 12.72"/>
+                    </svg>
+                    <!-- speaker.slash — shown when muted -->
+                    <svg class="icon-sound-off" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M11 5 6 9H3v6h3l5 4V5z"/>
+                        <line x1="23" y1="9" x2="17" y2="15"/>
+                        <line x1="17" y1="9" x2="23" y2="15"/>
+                    </svg>
+                </button>
+                <a href="/" class="display-nav-link" aria-label="Open dashboard">☰</a>
+            </div>
+        </header>
+
+        <main class="display-grid" id="display-grid" aria-label="Departure board">
+            <div class="quadrant quadrant--loading" aria-busy="true">
+                <div class="loading-pulse"></div>
+            </div>
+            <div class="quadrant quadrant--loading" aria-busy="true">
+                <div class="loading-pulse"></div>
+            </div>
+            <div class="quadrant quadrant--loading" aria-busy="true">
+                <div class="loading-pulse"></div>
+            </div>
+            <div class="quadrant quadrant--loading" aria-busy="true">
+                <div class="loading-pulse"></div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Zoom modal — shown when a departure badge is tapped -->
+    <div class="modal-overlay" id="modal-overlay" hidden
+         role="dialog" aria-modal="true" aria-label="Departure detail">
+        <div class="modal-card" id="modal-card">
+            <div class="modal-minutes" id="modal-minutes" aria-live="polite">--</div>
+            <div class="modal-chip-row">
+                <span class="modal-arrow" id="modal-arrow" aria-hidden="true"></span>
+                <span class="line-badge modal-line-chip" id="modal-line-chip"></span>
+            </div>
+            <time class="modal-clock" id="modal-clock"></time>
+        </div>
+    </div>
+
+    <script src="/static/display.js?v={{ asset_version }}"></script>
+</body>
+</html>

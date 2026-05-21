@@ -6,7 +6,6 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from flask import Flask
-from flask import Response
 from flask import jsonify
 from flask import make_response
 from flask import render_template
@@ -18,8 +17,7 @@ from .datamodels import Station
 from .departures_fallback import get_fallback_departures
 from .departures_fallback import get_snapshot_age_hhmmss
 from .departures_fallback import store_departures_snapshot
-from .image_generator import filter_and_group
-from .image_generator import render_image
+from .quadrants import filter_and_group
 from .utils import config
 from .utils import get_thresholds
 from .utils import get_walk_time
@@ -76,6 +74,13 @@ def index():
     return render_template("index.html", asset_version=asset_version)
 
 
+@app.route("/display")
+def display():
+    """Render the iPad display page."""
+    asset_version = int(datetime.now(timezone.utc).timestamp())
+    return render_template("display.html", asset_version=asset_version)
+
+
 @app.route("/api/location", methods=["POST"])
 def api_location():
     """Receive and log location data from browser."""
@@ -109,77 +114,74 @@ def api_stations():
     return jsonify({"stations": station_data, "config": config})
 
 
-def _fetch_esp32_departures(station_id: str, now: datetime, cache_key: str) -> tuple[list[Departure], bool] | None:
-    """Return departures and source flag, or None when no valid fallback exists."""
+def _fetch_display_departures(station_id: str, now: datetime, cache_key: str) -> tuple[list[Departure], bool] | None:
+    """Return departures and stale-fallback flag, or None when no valid data exists."""
     try:
         fresh_departures = get_inbound_trains_cached(station_id, cache_key) or []
         store_departures_snapshot(station_id, fresh_departures, now)
-        logger.debug(
-            "[_fetch_esp32_departures] using fresh departures station_id=%s count=%d", station_id, len(fresh_departures)
-        )
+        logger.debug("[_fetch_display_departures] fresh station_id=%s count=%d", station_id, len(fresh_departures))
         return fresh_departures, False
     except VBBAPIError:
         fallback_departures = get_fallback_departures(station_id, now)
         if fallback_departures is None:
-            logger.warning("[_fetch_esp32_departures] no fallback departures for station %s", station_id)
+            logger.error(
+                "❌ [_fetch_display_departures] VBB unreachable and no cached snapshot for station %s — display will return 502",
+                station_id,
+            )
             return None
 
-        age = get_snapshot_age_hhmmss(station_id, now) or "no fallback available"
-        logger.debug(
-            "[_fetch_esp32_departures] using stale departures fallback age=%s len_fallback_departures=%d",
+        age = get_snapshot_age_hhmmss(station_id, now) or "unknown"
+        logger.warning(
+            "⚠️  [_fetch_display_departures] VBB unreachable, serving stale snapshot station_id=%s age=%s count=%d",
+            station_id,
             age,
             len(fallback_departures),
         )
         return fallback_departures, True
 
 
-def _render_esp32_image(
-    departures: list[Departure],
-    now: datetime,
-    station_id: str,
-    cache_key: str,
-    display_config: dict,
-) -> Response:
-    """Render the e-ink PNG response from departures."""
-    if not departures:
-        logger.warning("[_render_esp32_image] no departures for station %s", station_id)
-        station_name = display_config.get("station_name", "")
-        display_time = now.astimezone(ZoneInfo("Europe/Berlin"))
-        return Response(render_image([], station_name, display_time), mimetype="image/png")
-
-    quadrants_data = filter_and_group(
-        departures,
-        now,
-        quadrants_config=display_config["quadrants"],
-        min_minutes=config["min_departure_time_min"],
-    )
-    station_name = display_config["station_name"]
-    display_time = now.astimezone(ZoneInfo("Europe/Berlin"))
-    img = render_image(quadrants_data, station_name, display_time)
-    logger.debug("[_render_esp32_image] station_id=%s cache_key=%s size=%.1fKB", station_id, cache_key, len(img) / 1024)
-    return Response(img, mimetype="image/png")
-
-
-@app.route("/api/esp32/image")
-def api_esp32_image():
-    """Generate PNG image for e-ink display."""
-    display_config = config["esp32-display"]
-    station_id = request.args.get("station_id", display_config["station_id"])
+@app.route("/api/display/data")
+def api_display_data():
+    """Return quadrant departure data for the fixed display station as JSON."""
+    display_config = config["display"]
+    station_id = display_config["station_id"]
     now = datetime.now(timezone.utc)
     cache_key = now.strftime("%Y%m%d%H%M%S")[:-1]
+
     try:
-        fetch_result = _fetch_esp32_departures(station_id, now, cache_key)
+        fetch_result = _fetch_display_departures(station_id, now, cache_key)
         if fetch_result is None:
-            # empty 502 response for downstream outages.
-            response = make_response("", 502)
-            response.headers["Content-Length"] = "0"
-            return response
-        departures, _used_fallback = fetch_result
-        return _render_esp32_image(departures, now, station_id, cache_key, display_config)
+            logger.error("❌ [/api/display/data] returning 502 — VBB down, no snapshot for station %s", station_id)
+            return make_response(jsonify({"error": "VBB unreachable", "detail": "No cached snapshot available"}), 502)
+
+        departures, used_fallback = fetch_result
+        quadrants_data = filter_and_group(
+            departures,
+            now,
+            quadrants_config=display_config["quadrants"],
+            min_minutes=config["min_departure_time_min"],
+            max_per_quadrant=3,
+        )
+
+        timestamp = now.astimezone(ZoneInfo("Europe/Berlin"))
+        return jsonify(
+            {
+                "station_name": display_config["station_name"],
+                "timestamp": timestamp.isoformat(),
+                "used_fallback": used_fallback,
+                "quadrants": [
+                    {
+                        "label": q.label,
+                        "arrow": q.arrow,
+                        "departures": [{"minutes": m, "line": ln} for m, ln in q.departures],
+                    }
+                    for q in quadrants_data
+                ],
+            }
+        )
     except Exception as error:
-        logger.exception("[/api/esp32/image] failed to build response: %s", error)
-        error_response = jsonify({"error": "Image generation failed", "detail": str(error)})
-        return make_response(error_response, 500)
+        logger.exception("[/api/display/data] failed: %s", error)
+        return make_response(jsonify({"error": "Failed to fetch display data", "detail": str(error)}), 500)
 
 
 def main():
