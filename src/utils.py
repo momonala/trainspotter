@@ -47,11 +47,19 @@ def _get_walk_time_gmaps(origin: tuple[float, float], destination: tuple[float, 
     return np.ceil(duration_min)
 
 
+def get_configured_walk_time(station_name: str) -> int | None:
+    """Return configured walk time when a config station key matches the name."""
+    station_name_lower = station_name.lower()
+    station_key = next((k for k in config["stations"] if k in station_name_lower), None)
+    if station_key is None:
+        return None
+    return config["stations"][station_key]["walk_time"]
+
+
 def get_walk_time(station: Station, current_coordinates: tuple[float, float] | None = None) -> int | None:
     """Get configured walk time for a station."""
-    station_key = next((k for k in config["stations"].keys() if k in station.name.lower()), None)
-    if station_key:
-        walk_time = config["stations"][station_key]["walk_time"]
+    walk_time = get_configured_walk_time(station.name)
+    if walk_time is not None:
         logger.debug("[get_walk_time] Station %s is configured with walk time %d minutes", station.name, walk_time)
         return walk_time
     else:

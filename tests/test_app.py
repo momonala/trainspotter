@@ -216,10 +216,29 @@ def test_api_display_data_returns_expected_shape(mock_trains, mock_filter, clien
     assert response.status_code == 200
     data = response.get_json()
     assert "station_name" in data
+    assert "walk_time" in data
     assert "timestamp" in data
     assert "used_fallback" in data
     assert "quadrants" in data
     assert isinstance(data["quadrants"], list)
+
+
+@patch("src.app.get_inbound_trains_cached", return_value=[])
+def test_api_display_data_quadrant_keys_match_config(mock_trains, client):
+    from src.utils import config
+
+    expected_keys = [q["key"] for q in config["display"]["quadrants"]]
+    response = client.get("/api/display/data")
+    assert response.status_code == 200
+    actual_keys = [q["key"] for q in response.get_json()["quadrants"]]
+    assert actual_keys == expected_keys
+
+
+@patch("src.app.get_inbound_trains_cached", return_value=[])
+def test_api_display_data_walk_time_from_config(mock_trains, client):
+    response = client.get("/api/display/data")
+    assert response.status_code == 200
+    assert response.get_json()["walk_time"] == 7
 
 
 @patch("src.app.filter_and_group", return_value=[])

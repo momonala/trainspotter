@@ -5,10 +5,20 @@
 // =============================================================================
 
 const DISPLAY_CONFIG = {
-    FETCH_TIMEOUT_MS:   18000,
+    FETCH_TIMEOUT_MS:    18000,
     REFRESH_INTERVAL_MS: 30000,
     CLOCK_INTERVAL_MS:   1000,
 };
+
+const SCHEDULE_CONFIG = {
+    WINDOW_MIN: 10,  // acceptable window before target: [target − WINDOW_MIN, target]
+    LS_KEY: 'displaySchedules',
+};
+
+const FLOOR_MINUTES_OFFSET_MS = 59_000;
+const WHEEL_ITEM_PX = 60; // keep in sync with --schedule-wheel-item-height in display.css
+const BERLIN_TZ = 'Europe/Berlin';
+const OVERLAY_CLOSE_MS = 200;
 
 // =============================================================================
 // State
@@ -17,6 +27,7 @@ const DISPLAY_CONFIG = {
 const state = {
     lastData: null,
     lastUpdatedAt: null,
+    quadrantsByKey: new Map(),
 };
 
 // Zoom modal state
@@ -134,6 +145,7 @@ function updateClock() {
     const el = document.getElementById('header-time');
     if (!el) return;
     el.textContent = new Date().toLocaleTimeString('de-DE', {
+        timeZone: BERLIN_TZ,
         hour: '2-digit',
         minute: '2-digit',
         second: '2-digit',
@@ -251,13 +263,15 @@ function updateZoomDisplay() {
     }
 }
 
+/** Floor-minute departures need +59s so Math.floor matches the badge on open. */
+function departureMsFromFloorMinutes(dep, nowMs = Date.now()) {
+    return nowMs + dep.minutes * 60_000 + FLOOR_MINUTES_OFFSET_MS;
+}
+
 function openZoom(dep, arrow) {
     unlockAudio();  // must happen inside tap handler so iOS allows audio
     zoom.active = true;
-    // Add 59s so Math.floor always equals dep.minutes on open.
-    // dep.minutes is a floor value (e.g. "9" means 9m0s – 9m59s remaining),
-    // so without this buffer the modal would show one less minute immediately.
-    zoom.departureTime = Date.now() + dep.minutes * 60_000 + 59_000;
+    zoom.departureTime = departureMsFromFloorMinutes(dep);
     zoom.line = dep.line;
     zoom.alarmArmed = dep.minutes > 7;      // arm alarm threshold (7 min)
     zoom.autoCloseArmed = dep.minutes > 5;  // arm auto-dismiss threshold (5 min)
@@ -298,21 +312,26 @@ function openZoom(dep, arrow) {
     }
 }
 
-function closeZoom() {
-    const overlay = document.getElementById('modal-overlay');
-    if (!overlay || overlay.hidden) return;
-
-    stopAlarm();
-    zoom.active = false;
-    zoom.alarmArmed = false;
-    zoom.autoCloseArmed = false;
-    document.getElementById('modal-card')?.classList.remove('alarming');
-
-    overlay.classList.add('closing');
+function closeOverlay(overlayEl, { beforeClose } = {}) {
+    if (!overlayEl || overlayEl.hidden) return;
+    beforeClose?.();
+    overlayEl.classList.add('closing');
     setTimeout(() => {
-        overlay.hidden = true;
-        overlay.classList.remove('closing');
-    }, 200);
+        overlayEl.hidden = true;
+        overlayEl.classList.remove('closing');
+    }, OVERLAY_CLOSE_MS);
+}
+
+function closeZoom() {
+    closeOverlay(document.getElementById('modal-overlay'), {
+        beforeClose: () => {
+            stopAlarm();
+            zoom.active = false;
+            zoom.alarmArmed = false;
+            zoom.autoCloseArmed = false;
+            document.getElementById('modal-card')?.classList.remove('alarming');
+        },
+    });
 }
 
 // =============================================================================
@@ -481,10 +500,15 @@ function showError(copy, isHard = false) {
 // Data loop
 // =============================================================================
 
+function rebuildQuadrantIndex(data) {
+    state.quadrantsByKey = new Map((data?.quadrants ?? []).map(q => [q.key, q]));
+}
+
 async function refresh() {
     try {
         const data = await fetchDisplayData();
         state.lastData = data;
+        rebuildQuadrantIndex(data);
         state.lastUpdatedAt = Date.now();
         renderQuadrants(data);
         updateLastUpdated();
@@ -494,6 +518,8 @@ async function refresh() {
         // Hard error only when we've never had good data; otherwise keep last display intact
         showError(copy, /* isHard */ !state.lastData);
     }
+    // Run outside the try/catch so schedule errors don't masquerade as fetch failures.
+    evaluateSchedules();
 }
 
 // =============================================================================
@@ -501,12 +527,14 @@ async function refresh() {
 // =============================================================================
 
 window.addEventListener('DOMContentLoaded', () => {
+    loadSchedules();
     updateClock();
     updateLastUpdated();
     setInterval(() => {
         updateClock();
         updateLastUpdated();
         updateZoomDisplay();
+        evaluateSchedules();
     }, DISPLAY_CONFIG.CLOCK_INTERVAL_MS);
 
     // Restore mute state on load
@@ -518,17 +546,479 @@ window.addEventListener('DOMContentLoaded', () => {
         muteBtn.addEventListener('click', toggleMute);
     }
 
-    // Close modal on backdrop click
+    // Close zoom modal on backdrop click
     document.getElementById('modal-overlay')?.addEventListener('click', e => {
         if (e.target === e.currentTarget) closeZoom();
     });
 
-    // Close modal on Escape
+    // Close modals on Escape
     document.addEventListener('keydown', e => {
-        if (e.key === 'Escape') closeZoom();
+        if (e.key === 'Escape') {
+            closeZoom();
+            closeScheduleModal();
+        }
     });
+
+    // Schedule button
+    document.getElementById('schedule-btn')?.addEventListener('click', () => {
+        unlockAudio();  // user gesture — unlock audio for future auto-zoom alarms
+        openScheduleModal();
+    });
+
+    // Schedule modal backdrop click
+    document.getElementById('schedule-overlay')?.addEventListener('click', e => {
+        if (e.target === e.currentTarget) closeScheduleModal();
+    });
+
+    // Schedule modal cancel / save
+    document.getElementById('schedule-cancel-btn')?.addEventListener('click', closeScheduleModal);
+    document.getElementById('schedule-save-btn')?.addEventListener('click', saveSchedule);
+
+    // Initial schedule badge render from localStorage
+    renderScheduleBadges();
 
     // Initial load then recurring poll
     refresh();
     setInterval(refresh, DISPLAY_CONFIG.REFRESH_INTERVAL_MS);
 });
+
+// =============================================================================
+// Scheduler — state & persistence
+// =============================================================================
+
+/**
+ * In-memory array of schedule objects:
+ * {
+ *   id: string,
+ *   targetMinutes: number,            — minutes from midnight (0–1439)
+ *   targetDate: string,               — 'YYYY-MM-DD' Berlin calendar day
+ *   quadrantKey: string,
+ *   label: string,
+ *   arrow: string,
+ *   activeDepartureKey: string|null,
+ * }
+ */
+let schedules = [];
+
+function berlinParts(date = new Date()) {
+    const parts = Object.fromEntries(
+        new Intl.DateTimeFormat('en-US', {
+            timeZone: BERLIN_TZ,
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: false,
+        })
+            .formatToParts(date)
+            .filter(part => part.type !== 'literal')
+            .map(part => [part.type, part.value]),
+    );
+    return {
+        year: Number(parts.year),
+        month: Number(parts.month),
+        day: Number(parts.day),
+        hours: Number(parts.hour),
+        minutes: Number(parts.minute),
+    };
+}
+
+function berlinDateString(date = new Date()) {
+    const { year, month, day } = berlinParts(date);
+    return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
+function berlinNowMinutes(date = new Date()) {
+    const { hours, minutes } = berlinParts(date);
+    return hours * 60 + minutes;
+}
+
+function berlinTomorrowDateString(date = new Date()) {
+    return berlinDateString(new Date(date.getTime() + 86_400_000));
+}
+
+/** If target time has already passed today in Berlin, schedule for tomorrow. */
+function resolveTargetDate(targetMinutes) {
+    if (targetMinutes <= berlinNowMinutes()) {
+        return berlinTomorrowDateString();
+    }
+    return berlinDateString();
+}
+
+function berlinTargetMs(targetDate, targetMinutes) {
+    const [year, month, day] = targetDate.split('-').map(Number);
+    const hour = Math.floor(targetMinutes / 60);
+    const minute = targetMinutes % 60;
+    // Scan ±3h around the naïve UTC equivalent to cover CET (+1) and CEST (+2).
+    const naiveUtcMs = Date.UTC(year, month - 1, day, hour, minute, 0);
+    for (let ms = naiveUtcMs - 3 * 3600_000; ms <= naiveUtcMs + 3 * 3600_000; ms += 60_000) {
+        const p = berlinParts(new Date(ms));
+        if (p.year === year && p.month === month && p.day === day && p.hours === hour && p.minutes === minute) {
+            return ms;
+        }
+    }
+    throw new Error(`Unresolved Berlin target: ${targetDate} ${hour}:${minute}`);
+}
+
+function scheduleTargetMs(schedule) {
+    return berlinTargetMs(schedule.targetDate, schedule.targetMinutes);
+}
+
+function loadSchedules() {
+    try {
+        const raw = localStorage.getItem(SCHEDULE_CONFIG.LS_KEY);
+        schedules = raw ? JSON.parse(raw) : [];
+    } catch (err) {
+        console.error('🗓 failed to load schedules', err);
+        schedules = [];
+    }
+    const today = berlinDateString();
+    schedules = schedules.map(s => ({
+        ...s,
+        targetDate: s.targetDate ?? today,
+    }));
+}
+
+function saveSchedulesToStorage() {
+    try {
+        localStorage.setItem(SCHEDULE_CONFIG.LS_KEY, JSON.stringify(schedules));
+    } catch (err) {
+        console.error('🗓 failed to persist schedules', err);
+    }
+}
+
+function addSchedule(schedule) {
+    schedules.push(schedule);
+    saveSchedulesToStorage();
+    renderScheduleBadges();
+}
+
+function removeSchedule(id) {
+    schedules = schedules.filter(s => s.id !== id);
+    saveSchedulesToStorage();
+    renderScheduleBadges();
+}
+
+// =============================================================================
+// Scheduler — badge strip
+// =============================================================================
+
+function formatScheduleLabel(schedule) {
+    const h = String(Math.floor(schedule.targetMinutes / 60)).padStart(2, '0');
+    const m = String(schedule.targetMinutes % 60).padStart(2, '0');
+    const time = `${h}:${m} ${schedule.arrow}`;
+    const today = berlinDateString();
+    if (schedule.targetDate && schedule.targetDate !== today) {
+        const suffix = schedule.targetDate === berlinTomorrowDateString() ? 'tomorrow' : schedule.targetDate;
+        return `${time} · ${suffix}`;
+    }
+    return time;
+}
+
+function renderScheduleBadges() {
+    const container = document.getElementById('schedule-badges');
+    if (!container) return;
+    container.innerHTML = '';
+
+    for (const schedule of schedules) {
+        const label = formatScheduleLabel(schedule);
+        const badge = document.createElement('div');
+        badge.className = 'schedule-badge';
+        badge.dataset.scheduleId = schedule.id;
+
+        const text = document.createElement('span');
+        text.className = 'schedule-badge__text';
+        text.textContent = label;
+
+        const removeBtn = document.createElement('button');
+        removeBtn.className = 'schedule-badge__remove';
+        removeBtn.type = 'button';
+        removeBtn.setAttribute('aria-label', `Remove reminder ${label}`);
+        removeBtn.textContent = '×';
+        removeBtn.addEventListener('click', () => {
+            removeSchedule(schedule.id);
+        });
+
+        badge.append(text, removeBtn);
+        container.appendChild(badge);
+    }
+}
+
+// =============================================================================
+// Scheduler — modal
+// =============================================================================
+
+let scheduleModalSelectedQuadrantKey = null;
+
+function berlinNow() {
+    const { hours, minutes } = berlinParts();
+    return { hours, minutes };
+}
+
+/** Populate a wheel element with padded number items from 0..max-1. */
+function buildWheelItems(wheelEl, count, padLen) {
+    wheelEl.innerHTML = '';
+    for (let i = 0; i < count; i++) {
+        const item = document.createElement('div');
+        item.className = 'schedule-wheel-item';
+        item.dataset.value = i;
+        item.setAttribute('role', 'option');
+        item.textContent = String(i).padStart(padLen, '0');
+        wheelEl.appendChild(item);
+    }
+}
+
+function scrollWheelTo(wheelEl, value) {
+    wheelEl.scrollTop = value * WHEEL_ITEM_PX;
+}
+
+function readWheelValue(wheelEl, count) {
+    const index = Math.round(wheelEl.scrollTop / WHEEL_ITEM_PX);
+    return Math.min(count - 1, Math.max(0, index));
+}
+
+function readSelectedTargetMinutes() {
+    const hourWheel = document.getElementById('schedule-wheel-hour');
+    const minWheel = document.getElementById('schedule-wheel-minute');
+    const hours = hourWheel ? readWheelValue(hourWheel, 24) : 0;
+    const minutes = minWheel ? readWheelValue(minWheel, 60) : 0;
+    return hours * 60 + minutes;
+}
+
+function updateScheduleDateHint() {
+    const hint = document.getElementById('schedule-date-hint');
+    if (!hint) return;
+    const targetMinutes = readSelectedTargetMinutes();
+    const targetDate = resolveTargetDate(targetMinutes);
+    hint.textContent = targetDate === berlinDateString() ? 'Today' : 'Tomorrow';
+}
+
+let scheduleDateHintRafId = null;
+
+function throttledUpdateScheduleDateHint() {
+    if (scheduleDateHintRafId !== null) return;
+    scheduleDateHintRafId = requestAnimationFrame(() => {
+        scheduleDateHintRafId = null;
+        updateScheduleDateHint();
+    });
+}
+
+function buildQuadrantPicker() {
+    const grid = document.getElementById('schedule-quadrant-grid');
+    if (!grid) return;
+    grid.innerHTML = '';
+
+    const quadrants = state.lastData?.quadrants ?? [];
+    if (quadrants.length === 0) {
+        const msg = document.createElement('p');
+        msg.style.cssText = 'color: var(--d-text-secondary); font-size: 13px; text-align: center;';
+        msg.textContent = 'Waiting for live data…';
+        grid.appendChild(msg);
+        return;
+    }
+
+    for (const q of quadrants) {
+        const btn = document.createElement('button');
+        btn.className = 'schedule-quadrant-btn';
+        btn.type = 'button';
+        btn.dataset.key = q.key;
+        btn.setAttribute('aria-pressed', 'false');
+        btn.setAttribute('aria-label', `${q.label} ${q.arrow}`);
+
+        if (q.key === scheduleModalSelectedQuadrantKey) {
+            btn.classList.add('selected');
+            btn.setAttribute('aria-pressed', 'true');
+        }
+
+        const arrow = document.createElement('span');
+        arrow.className = 'schedule-quadrant-btn__arrow';
+        arrow.textContent = q.arrow;
+
+        const label = document.createElement('span');
+        label.className = 'schedule-quadrant-btn__label';
+        label.textContent = q.label;
+
+        btn.append(arrow, label);
+        btn.addEventListener('click', () => {
+            scheduleModalSelectedQuadrantKey = q.key;
+            // Update all button states
+            grid.querySelectorAll('.schedule-quadrant-btn').forEach(b => {
+                const isSelected = b.dataset.key === q.key;
+                b.classList.toggle('selected', isSelected);
+                b.setAttribute('aria-pressed', String(isSelected));
+            });
+            document.getElementById('schedule-save-btn').disabled = false;
+        });
+
+        grid.appendChild(btn);
+    }
+}
+
+function openScheduleModal() {
+    const overlay = document.getElementById('schedule-overlay');
+    if (!overlay) return;
+
+    scheduleModalSelectedQuadrantKey = null;
+    const saveBtn = document.getElementById('schedule-save-btn');
+    if (saveBtn) saveBtn.disabled = true;
+
+    // Build wheels
+    const hourWheel = document.getElementById('schedule-wheel-hour');
+    const minWheel = document.getElementById('schedule-wheel-minute');
+    if (hourWheel) buildWheelItems(hourWheel, 24, 2);
+    if (minWheel) buildWheelItems(minWheel, 60, 2);
+
+    // Default to current Berlin time
+    const { hours, minutes } = berlinNow();
+    if (hourWheel) {
+        hourWheel.onscroll = throttledUpdateScheduleDateHint;
+        requestAnimationFrame(() => scrollWheelTo(hourWheel, hours));
+    }
+    if (minWheel) {
+        minWheel.onscroll = throttledUpdateScheduleDateHint;
+        requestAnimationFrame(() => scrollWheelTo(minWheel, minutes));
+    }
+
+    updateScheduleDateHint();
+
+    // Build quadrant picker from live data
+    buildQuadrantPicker();
+
+    overlay.hidden = false;
+    overlay.classList.remove('closing');
+
+    // Focus the save button for keyboard users
+    requestAnimationFrame(() => saveBtn?.focus());
+}
+
+function closeScheduleModal() {
+    closeOverlay(document.getElementById('schedule-overlay'));
+}
+
+function saveSchedule() {
+    if (!scheduleModalSelectedQuadrantKey) return;
+
+    unlockAudio();
+    const targetMinutes = readSelectedTargetMinutes();
+    const targetDate = resolveTargetDate(targetMinutes);
+
+    const quadrantData = state.quadrantsByKey.get(scheduleModalSelectedQuadrantKey)
+        ?? state.lastData?.quadrants?.find(q => q.key === scheduleModalSelectedQuadrantKey);
+    if (!quadrantData) return;
+
+    const schedule = {
+        id: crypto.randomUUID(),
+        targetMinutes,
+        targetDate,
+        quadrantKey: quadrantData.key,
+        label: quadrantData.label,
+        arrow: quadrantData.arrow,
+        activeDepartureKey: null,
+    };
+
+    addSchedule(schedule);
+    closeScheduleModal();
+    console.info('🗓 Schedule saved:', formatScheduleLabel(schedule));
+}
+
+// =============================================================================
+// Scheduler — matcher & auto-zoom
+// =============================================================================
+
+/** Stable fingerprint for a departure — used to detect a new/changed selection. */
+function departureKey(dep) {
+    return `${dep.line}:${dep.minutes}`;
+}
+
+/**
+ * Given a schedule and its quadrant's departures, return the best departure
+ * to auto-zoom, or null if none qualifies yet.
+ *
+ * Target time = latest acceptable train departure (e.g. 10:30).
+ * Window = [target − WINDOW_MIN, target]. Returns the latest departure in the
+ * window as soon as it appears in the API — zoom triggers immediately, just
+ * like a manual tap. The alarm (≤ 7 min) and auto-dismiss (≤ 5 min) are
+ * handled by openZoom/updateZoomDisplay as normal.
+ */
+function pickDepartureForSchedule(schedule, quadrant, nowMs) {
+    const targetMs = scheduleTargetMs(schedule);
+    const targetMinutesFromNow = Math.round((targetMs - nowMs) / 60_000);
+
+    if (targetMs <= nowMs) {
+        console.debug(`🗓 [pick] schedule "${formatScheduleLabel(schedule)}" target is in the past, skipping`);
+        return null;
+    }
+
+    const earliestMs = targetMs - SCHEDULE_CONFIG.WINDOW_MIN * 60_000;
+    let ideal = null;
+
+    for (const dep of (quadrant.departures ?? [])) {
+        const depMs = departureMsFromFloorMinutes(dep, nowMs);
+        const inWindow = depMs >= earliestMs && depMs <= targetMs;
+        console.debug(
+            `🗓 [pick] dep ${dep.line} in ${dep.minutes}min — depMs offset: ${Math.round((depMs - nowMs) / 60_000)}min, window: [${Math.round((earliestMs - nowMs) / 60_000)}, ${targetMinutesFromNow}]min — inWindow: ${inWindow}`,
+        );
+
+        if (!inWindow) continue;
+
+        if (!ideal || depMs > ideal.depMs) {
+            ideal = { dep, depMs };
+        }
+    }
+
+    console.debug(`🗓 [pick] ideal: ${ideal ? `${ideal.dep.line} in ${ideal.dep.minutes}min` : 'none'}`);
+    return ideal?.dep ?? null;
+}
+
+/**
+ * Evaluate all active schedules against current departure data.
+ * Called after each successful API refresh and on every clock tick.
+ */
+function evaluateSchedules() {
+    if (!state.lastData || schedules.length === 0) return;
+
+    const nowMs = Date.now();
+
+    for (const schedule of schedules) {
+        const quadrant = state.quadrantsByKey.get(schedule.quadrantKey);
+        if (!quadrant) {
+            console.warn(`🗓 [eval] no quadrant found for key "${schedule.quadrantKey}" — available: ${[...state.quadrantsByKey.keys()].join(', ')}`);
+            continue;
+        }
+
+        console.debug(`🗓 [eval] schedule "${formatScheduleLabel(schedule)}" → quadrant "${quadrant.key}" has ${quadrant.departures.length} departure(s): ${quadrant.departures.map(d => `${d.line}@${d.minutes}min`).join(', ')}`);
+
+        const pick = pickDepartureForSchedule(schedule, quadrant, nowMs);
+
+        if (!pick) {
+            schedule.activeDepartureKey = null;
+            continue;
+        }
+
+        const newKey = departureKey(pick);
+        const prevKey = schedule.activeDepartureKey;
+
+        if (newKey === prevKey) {
+            continue;
+        }
+
+        const isUpgrade = prevKey !== null;  // switching from one dep to a better one
+        schedule.activeDepartureKey = newKey;
+
+        if (zoom.active && !isUpgrade) {
+            console.debug(`🗓 [eval] zoom already open, not interrupting for "${newKey}"`);
+            continue;
+        }
+
+        console.info(`🗓 [eval] auto-zoom for schedule "${formatScheduleLabel(schedule)}" → ${newKey} (upgrade: ${isUpgrade})`);
+
+        if (isUpgrade) {
+            // Better train found — soft beep then switch
+            beepOnce();
+            closeZoom();
+        }
+
+        openZoom(pick, schedule.arrow);
+    }
+}

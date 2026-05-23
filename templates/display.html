@@ -15,12 +15,18 @@
     <div class="display-wrapper">
         <header class="display-header">
             <span class="station-title" id="station-title" aria-label="Station name">—</span>
+            <div class="schedule-badges" id="schedule-badges" aria-label="Scheduled reminders"></div>
             <div class="header-right">
                 <span class="stale-badge" id="stale-badge" role="status" aria-live="polite">
                     ⚠&thinsp;stale data
                 </span>
                 <time class="header-time" id="header-time" aria-label="Current time"></time>
                 <span class="last-updated-ago" id="last-updated-ago" aria-live="polite"></span>
+                <button id="schedule-btn" class="icon-button" aria-label="Schedule train reminder" type="button">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+                        <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+                    </svg>
+                </button>
                 <button id="mute-btn" class="icon-button" aria-label="Mute alarm" aria-pressed="false">
                     <!-- speaker.wave.2 — shown when unmuted -->
                     <svg class="icon-sound-on" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -65,6 +71,39 @@
                 <span class="line-badge modal-line-chip" id="modal-line-chip"></span>
             </div>
             <time class="modal-clock" id="modal-clock"></time>
+        </div>
+    </div>
+
+    <!-- Schedule modal — shown when + button is tapped -->
+    <div class="modal-overlay schedule-overlay" id="schedule-overlay" hidden
+         role="dialog" aria-modal="true" aria-labelledby="schedule-modal-title">
+        <div class="modal-card modal-card--schedule" id="schedule-modal-card">
+            <h2 class="schedule-modal-title" id="schedule-modal-title">Schedule Reminder</h2>
+
+            <!-- Time picker — two scroll-snap wheels -->
+            <div class="schedule-time-picker">
+                <div class="schedule-wheel-wrap">
+                    <div class="schedule-wheel" id="schedule-wheel-hour" role="listbox" aria-label="Hour"></div>
+                </div>
+                <span class="schedule-time-colon" aria-hidden="true">:</span>
+                <div class="schedule-wheel-wrap">
+                    <div class="schedule-wheel" id="schedule-wheel-minute" role="listbox" aria-label="Minute"></div>
+                </div>
+            </div>
+
+            <p class="schedule-date-hint" id="schedule-date-hint" aria-live="polite"></p>
+
+            <!-- Quadrant picker — 4 buttons populated by JS from live data -->
+            <div class="schedule-quadrant-grid" id="schedule-quadrant-grid"
+                 role="group" aria-label="Direction"></div>
+
+            <!-- Actions -->
+            <div class="schedule-modal-actions">
+                <button type="button" id="schedule-cancel-btn"
+                        class="schedule-action-btn schedule-action-btn--cancel">Cancel</button>
+                <button type="button" id="schedule-save-btn"
+                        class="schedule-action-btn schedule-action-btn--save" disabled>Save</button>
+            </div>
         </div>
     </div>
 

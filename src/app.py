@@ -19,6 +19,7 @@ from .departures_fallback import get_snapshot_age_hhmmss
 from .departures_fallback import store_departures_snapshot
 from .quadrants import filter_and_group
 from .utils import config
+from .utils import get_configured_walk_time
 from .utils import get_thresholds
 from .utils import get_walk_time
 from .utils import process_station_departures
@@ -163,14 +164,18 @@ def api_display_data():
             max_per_quadrant=3,
         )
 
+        walk_time = get_configured_walk_time(display_config["station_name"])
+
         timestamp = now.astimezone(ZoneInfo("Europe/Berlin"))
         return jsonify(
             {
                 "station_name": display_config["station_name"],
+                "walk_time": walk_time,
                 "timestamp": timestamp.isoformat(),
                 "used_fallback": used_fallback,
                 "quadrants": [
                     {
+                        "key": q.key,
                         "label": q.label,
                         "arrow": q.arrow,
                         "departures": [{"minutes": m, "line": ln} for m, ln in q.departures],

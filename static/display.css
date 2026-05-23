@@ -545,6 +545,274 @@ body::before {
                             0 0 80px rgba(255, 59, 48, 0.80); }
 }
 
+/* ── Schedule badge strip (header middle) ─────────────────── */
+
+.schedule-badges {
+    flex: 1;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+    padding: 0 12px;
+    min-width: 0;
+}
+
+.schedule-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 6px 4px 10px;
+    background: rgba(100, 180, 255, 0.12);
+    border: 1px solid rgba(100, 180, 255, 0.30);
+    border-radius: 20px;
+    color: rgba(100, 200, 255, 0.90);
+    font-size: 12px;
+    font-weight: 500;
+    white-space: nowrap;
+    letter-spacing: 0.2px;
+}
+
+.schedule-badge__text {
+    font-variant-numeric: tabular-nums;
+}
+
+.schedule-badge__remove {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    /* Expand hit target for touch without enlarging visual */
+    padding: 0;
+    margin: -2px;
+    background: none;
+    border: none;
+    border-radius: 50%;
+    color: inherit;
+    cursor: pointer;
+    font-size: 14px;
+    line-height: 1;
+    opacity: 0.7;
+    transition: opacity 0.15s ease, background 0.15s ease;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.schedule-badge__remove:hover  { opacity: 1; background: rgba(255,255,255,0.12); }
+.schedule-badge__remove:active { transform: scale(0.88); }
+
+/* ── Schedule modal ───────────────────────────────────────── */
+
+.schedule-overlay {
+    z-index: 210; /* above zoom modal (200) */
+}
+
+.modal-card--schedule {
+    gap: 28px;
+    padding: 40px 52px 36px;
+    background: rgba(14, 14, 26, 0.88);
+    border-radius: 32px;
+    backdrop-filter: blur(32px);
+    -webkit-backdrop-filter: blur(32px);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.10),
+                0 32px 100px rgba(0, 0, 0, 0.80);
+    animation: cardZoomIn 0.32s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+    min-width: 320px;
+    max-width: 90vw;
+}
+
+.schedule-modal-title {
+    font-size: 20px;
+    font-weight: 600;
+    color: var(--d-text);
+    letter-spacing: -0.3px;
+    margin: 0;
+}
+
+/* Time picker row */
+.schedule-time-picker {
+    --schedule-wheel-item-height: 60px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.schedule-time-colon {
+    font-size: 36px;
+    font-weight: 300;
+    color: var(--d-text-secondary);
+    line-height: 1;
+    padding-bottom: 4px;
+}
+
+.schedule-date-hint {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--d-text-secondary);
+    letter-spacing: 0.3px;
+    margin: -12px 0 0;
+    min-height: 18px;
+    text-align: center;
+}
+
+/* Scroll-snap wheel */
+.schedule-wheel-wrap {
+    position: relative;
+    width: 80px;
+    height: 180px;
+    overflow: hidden;
+    /* Gradient fade at top and bottom to hint that more items exist */
+    -webkit-mask-image: linear-gradient(to bottom,
+        transparent 0%, black 22%, black 78%, transparent 100%);
+    mask-image: linear-gradient(to bottom,
+        transparent 0%, black 22%, black 78%, transparent 100%);
+}
+
+/* The thin horizontal bar highlighting the selected item */
+.schedule-wheel-wrap::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 0;
+    right: 0;
+    height: var(--schedule-wheel-item-height);
+    transform: translateY(-50%);
+    border-top: 1px solid rgba(255, 255, 255, 0.18);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.18);
+    pointer-events: none;
+    z-index: 1;
+}
+
+.schedule-wheel {
+    height: 100%;
+    overflow-y: scroll;
+    scroll-snap-type: y mandatory;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    /* Padding so first/last items can reach center */
+    padding: var(--schedule-wheel-item-height) 0;
+}
+
+.schedule-wheel::-webkit-scrollbar { display: none; }
+
+.schedule-wheel-item {
+    height: var(--schedule-wheel-item-height);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 32px;
+    font-weight: 300;
+    font-variant-numeric: tabular-nums;
+    color: var(--d-text);
+    scroll-snap-align: center;
+    cursor: pointer;
+    user-select: none;
+    -webkit-user-select: none;
+    transition: opacity 0.1s ease;
+}
+
+/* Quadrant picker */
+.schedule-quadrant-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    width: 100%;
+}
+
+.schedule-quadrant-btn {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    padding: 14px 10px;
+    background: var(--d-glass-bg);
+    border: 1px solid var(--d-glass-border);
+    border-radius: 16px;
+    color: var(--d-text-secondary);
+    cursor: pointer;
+    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+    -webkit-tap-highlight-color: transparent;
+    min-height: 72px;
+}
+
+.schedule-quadrant-btn:hover {
+    background: rgba(255, 255, 255, 0.10);
+    color: var(--d-text);
+}
+
+.schedule-quadrant-btn:active {
+    transform: scale(0.96);
+}
+
+.schedule-quadrant-btn.selected {
+    background: rgba(100, 180, 255, 0.15);
+    border-color: rgba(100, 180, 255, 0.45);
+    color: rgba(100, 200, 255, 0.95);
+}
+
+.schedule-quadrant-btn__arrow {
+    font-size: 28px;
+    font-weight: 700;
+    line-height: 1;
+    font-family: 'SF Pro Display', -apple-system, sans-serif;
+}
+
+.schedule-quadrant-btn__label {
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+    opacity: 0.8;
+}
+
+/* Action buttons */
+.schedule-modal-actions {
+    display: flex;
+    gap: 12px;
+    width: 100%;
+}
+
+.schedule-action-btn {
+    flex: 1;
+    padding: 14px 0;
+    border-radius: 14px;
+    border: 1px solid var(--d-glass-border);
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s ease, opacity 0.15s ease;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.schedule-action-btn--cancel {
+    background: var(--d-glass-bg);
+    color: var(--d-text-secondary);
+}
+
+.schedule-action-btn--cancel:hover {
+    background: rgba(255, 255, 255, 0.10);
+    color: var(--d-text);
+}
+
+.schedule-action-btn--save {
+    background: rgba(100, 180, 255, 0.20);
+    border-color: rgba(100, 180, 255, 0.40);
+    color: rgba(100, 200, 255, 0.95);
+}
+
+.schedule-action-btn--save:hover:not(:disabled) {
+    background: rgba(100, 180, 255, 0.30);
+}
+
+.schedule-action-btn--save:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+}
+
+.schedule-action-btn:active:not(:disabled) {
+    transform: scale(0.97);
+}
+
 /* ── Landscape-specific adjustments ──────────────────────── */
 
 /* Very short landscape (e.g. iPhone landscape) */

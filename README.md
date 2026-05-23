@@ -27,7 +27,7 @@ trainspotter/
 │   └── fetch_stations.py       # Builds vbb_stations.json via VBB /locations/nearby grid sweep
 ├── static/
 │   ├── app.js                  # Main dashboard: geolocation, polling, departure rendering, filter controls
-│   ├── display.js              # Display page: quadrant rendering, 30s polling, zoom modal, alarm engine
+│   ├── display.js              # Display page: quadrant rendering, polling, zoom modal, alarm, schedule matcher
 │   ├── styles.css              # BVG/VBB line colours and main dashboard styles
 │   └── display.css             # Display page: Apple Liquid Glass aesthetic, landscape 2×2 grid
 ├── templates/
@@ -90,6 +90,7 @@ flowchart TB
   subgraph client [Browser]
     Dashboard[app.js / index.html]
     Display[display.js / display.html]
+    LocalStore[(localStorage)]
   end
 
   Config --> Api
@@ -98,6 +99,7 @@ flowchart TB
   Dashboard -->|POST coords| Api
   Dashboard -->|GET stations| Api
   Display -->|GET display/data| Api
+  Display <-->|schedules, mute| LocalStore
   Api --> VbbMod
   Api --> Utils
   Api --> Quadrants
@@ -149,9 +151,38 @@ sequenceDiagram
 
 ### Display request flow
 
-`GET /display` serves a full-viewport landscape HTML page. JavaScript polls `GET /api/display/data` every 30 seconds. The endpoint uses the fixed `station_id` from `config.json["display"]`, fetches departures (with in-memory fallback from `departures_fallback.py` on `VBBAPIError`), groups them into four quadrants, and returns JSON. The page renders a 2×2 quadrant grid with Apple Liquid Glass styling optimised for iPad mini in landscape mode.
+`GET /display` serves a full-viewport landscape HTML page. JavaScript polls `GET /api/display/data` every 30 seconds and re-evaluates scheduled reminders every 1 second (clock tick). The endpoint uses the fixed `station_id` from `config.json["display"]`, fetches departures (with in-memory fallback from `departures_fallback.py` on `VBBAPIError`), groups them into four quadrants, and returns JSON. The page renders a 2×2 quadrant grid with Apple Liquid Glass styling optimised for iPad mini in landscape mode.
 
 When stale fallback data is served, the response includes `"used_fallback": true` and the display shows a ⚠ indicator in the header.
+
+```mermaid
+sequenceDiagram
+  participant User
+  participant Display as display.js
+  participant LS as localStorage
+  participant Flask as GET /api/display/data
+  participant VBB as VBB departures
+
+  User->>Display: tap +, pick time + quadrant, Save
+  Display->>LS: write displaySchedules[]
+  Display->>Display: unlockAudio (iOS gesture)
+
+  loop Every 30s
+    Display->>Flask: fetch quadrant data
+    Flask->>VBB: departures for display.station_id
+    Flask-->>Display: quadrants with key, minutes, line
+    Display->>Display: renderQuadrants + evaluateSchedules
+  end
+
+  loop Every 1s
+    Display->>Display: clock tick + evaluateSchedules
+  end
+
+  alt ideal train appears in window [target − 10 min, target]
+    Display->>Display: openZoom(dep) — same path as manual tap
+    Note over Display: zoom alarm at ≤7 min handles leave-home
+  end
+```
 
 ### Display page interactions
 
@@ -169,9 +200,114 @@ Departure badges are interactive. Tapping one opens a full-screen zoom modal sho
 
 **Mute button:** The speaker icon in the header mutes/unmutes the alarm. State persists in `localStorage` (`alarmMuted`).
 
-**iOS audio note:** `AudioContext` on iOS Safari starts suspended and can only be unlocked inside a user-gesture handler. `unlockAudio()` is called at the top of `openZoom()` (which runs in a tap handler) to ensure the context is running before any scheduled alarm. Do not attempt to play audio from a timer or interval without first having called `unlockAudio()` during a touch event.
+**iOS audio note:** `AudioContext` on iOS Safari starts suspended and can only be unlocked inside a user-gesture handler. `unlockAudio()` runs when opening the schedule modal (+ button) and when saving a schedule, so auto-triggered zoom alarms work. Manual badge taps also call it via `openZoom()`.
 
 **Minutes accuracy:** The server returns integer minutes (floor value). The zoom modal offsets the departure timestamp by +59 s so the initial countdown display always matches what the badge showed, rather than appearing one minute lower on open.
+
+### Scheduled train reminders
+
+Client-side feature in `display.js`. No server persistence — schedules live in `localStorage` under `displaySchedules`.
+
+#### User flow
+
+1. Tap **+** in the header → time picker (hour/minute scroll wheels) + four quadrant buttons.
+2. Wheels default to the current **Berlin** time. If the selected time is **≤ now**, the hint shows **Tomorrow** and save stores the next calendar day.
+3. Pick a quadrant (required before Save). A badge appears in the header (e.g. `10:33 ↓` or `10:00 ↓ · tomorrow`).
+4. Tap **×** on a badge to remove that schedule.
+5. When the matcher fires, the zoom modal opens automatically (same alarm/countdown as a manual tap).
+
+#### Spec: what the target time means
+
+| Concept | Meaning |
+|---------|---------|
+| **Target time** | Latest train **departure** you will take (e.g. 10:30). |
+| **Acceptable window** | Departures from `(target − 10 min)` through `target` — e.g. 10:20–10:30. Any train in this window is valid; the one closest to the deadline is preferred. |
+| **Leave home** | **Not** part of the scheduler. Handled by the zoom modal alarm at ≤ 7 min before departure. |
+
+#### Spec: schedule object (`localStorage`)
+
+Each entry in `displaySchedules`:
+
+```json
+{
+  "id": "uuid",
+  "targetMinutes": 633,
+  "targetDate": "2026-05-24",
+  "quadrantKey": "s1_26_down",
+  "label": "S1/26",
+  "arrow": "↓",
+  "activeDepartureKey": null
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `targetMinutes` | Minutes from Berlin midnight, 0–1439 (e.g. 633 = 10:33). |
+| `targetDate` | Berlin calendar day `YYYY-MM-DD`. Set to tomorrow when `targetMinutes ≤ now` at save time. |
+| `quadrantKey` | Matches `quadrants[].key` from `/api/display/data` (from `config.json` `display.quadrants`). |
+| `activeDepartureKey` | Runtime fingerprint `"{line}:{minutes}"` of the auto-selected departure; cleared when no match. |
+
+Legacy schedules without `targetDate` default to today on load.
+
+#### Spec: selection algorithm (`pickDepartureForSchedule`)
+
+Evaluated on every successful poll **and** every 1 s clock tick.
+
+1. **Target instant** — `targetDate` + `targetMinutes` in Europe/Berlin. Skip if target is in the past.
+2. **Window** — `earliestMs = targetMs − 10 min`, `latestMs = targetMs`.
+3. **Candidates** — departures in the scheduled quadrant where:
+   - `depMs = now + dep.minutes×60s + 59s` (matches zoom modal floor semantics)
+   - `depMs > now` (has not left)
+   - `earliestMs ≤ depMs ≤ latestMs`
+4. **Ideal train** — latest `depMs` among candidates (the train closest to your deadline).
+5. **Trigger** — auto-zoom as soon as the ideal train appears in the window (no minimum-minutes-away gate). Alarm (≤ 7 min) and auto-dismiss (≤ 5 min) behave identically to a manual tap.
+6. **Upgrade** — if a later ideal train appears while one is already selected, soft beep + switch zoom.
+
+**Example (target 10:30):** when a train departing 10:20–10:30 first appears in the API (could be 10–15 min ahead of the window opening), the zoom opens immediately. The alarm at ≤ 7 min then fires to tell you to leave home.
+
+**Tomorrow example (11 pm → 10:00 next day):** save stores `targetDate` = tomorrow. Matcher ignores tonight's departures because their `depMs` is before `earliestMs` on the target day. Fires when a train in `[09:50, 10:00]` first appears next morning.
+
+#### Boundaries and limits
+
+| Topic | Behaviour |
+|-------|-----------|
+| **Persistence** | Browser `localStorage` only; cleared with site data; not synced across devices. |
+| **Horizon** | Practical limit ~24 h (tomorrow rollover). No multi-day scheduling. |
+| **API visibility** | Only departures returned by VBB and kept by `max_per_quadrant` (3) are matchable. |
+| **Multiple schedules** | Each evaluated independently; one zoom modal — first match wins unless upgrading the same schedule. |
+| **Walk time** | Exposed as `walk_time` on `/api/display/data` for dashboard parity; **not** used by the scheduler. |
+
+```mermaid
+flowchart TD
+  subgraph inputs [Inputs each tick]
+    Poll["GET /api/display/data"]
+    LS["localStorage schedules"]
+    Clock["1s clock tick"]
+  end
+
+  subgraph matcher [pickDepartureForSchedule]
+    Target["targetMs from targetDate + targetMinutes"]
+    Window["window: target−5min … target"]
+    Filter["filter quadrant departures in window"]
+    Latest["pick latest depMs"]
+    Trigger{"dep.minutes ≤ 5?"}
+  end
+
+  subgraph output [Output]
+    Zoom["openZoom → alarm at ≤7 min"]
+    Idle["no action"]
+  end
+
+  Poll --> Filter
+  LS --> Target
+  Clock --> Filter
+  Target --> Window
+  Window --> Filter
+  Filter --> Latest
+  Latest --> Trigger
+  Trigger -->|yes| Zoom
+  Trigger -->|no| Idle
+```
 
 ---
 
@@ -275,10 +411,12 @@ Flask port is set in `pyproject.toml` under `[tool.config]`.
 ```json
 {
   "station_name": "Bornholmerstr",
+  "walk_time": 7,
   "timestamp": "2026-05-21T10:36:00+02:00",
   "used_fallback": false,
   "quadrants": [
     {
+      "key": "s1_26_up",
       "label": "S1/26",
       "arrow": "↑",
       "departures": [
@@ -286,12 +424,33 @@ Flask port is set in `pyproject.toml` under `[tool.config]`.
         { "minutes": 14, "line": "S26" }
       ]
     },
-    { "label": "S1/26", "arrow": "↓", "departures": [] },
-    { "label": "S8/85", "arrow": "↑", "departures": [{ "minutes": 11, "line": "S8" }] },
-    { "label": "S8/85", "arrow": "↻", "departures": [] }
+    {
+      "key": "s1_26_down",
+      "label": "S1/26",
+      "arrow": "↓",
+      "departures": []
+    },
+    {
+      "key": "s8_up",
+      "label": "S8/85",
+      "arrow": "↑",
+      "departures": [{ "minutes": 11, "line": "S8" }]
+    },
+    {
+      "key": "s8_clockwise",
+      "label": "S8/85",
+      "arrow": "↻",
+      "departures": []
+    }
   ]
 }
 ```
+
+| Field | Used by |
+|-------|---------|
+| `quadrants[].key` | Schedule matcher — ties a reminder to a quadrant (`display.quadrants[].key` in config). |
+| `quadrants[].departures[].minutes` | Floor minutes until departure; matcher adds 59 s to align with zoom modal. |
+| `walk_time` | Dashboard parity only; scheduler does not use it (leave-home is the zoom alarm). |
 
 `used_fallback: true` means VBB was unreachable and time-shifted stale departures are being served. The display page shows a ⚠ stale-data badge in this case.
 

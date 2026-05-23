@@ -51,8 +51,10 @@ def test_filter_and_group_empty_departures_yields_empty_quadrants(now):
 
 def test_filter_and_group_assigns_label_and_arrow(now):
     result = filter_and_group([], now, QUADRANTS_CONFIG)
+    assert result[0].key == "s1_up"
     assert result[0].label == "S1/26"
     assert result[0].arrow == "↑"
+    assert result[2].key == "s8_up"
     assert result[2].label == "S8/85"
     assert result[2].arrow == "↑"
 
@@ -114,7 +116,8 @@ def test_filter_and_group_routes_by_direction(now):
 
 
 def test_quadrant_data_dataclass():
-    q = QuadrantData(label="S1/26", arrow="↑", departures=[(7, "S1")])
+    q = QuadrantData(key="s1_up", label="S1/26", arrow="↑", departures=[(7, "S1")])
+    assert q.key == "s1_up"
     assert q.label == "S1/26"
     assert q.arrow == "↑"
     assert q.departures == [(7, "S1")]

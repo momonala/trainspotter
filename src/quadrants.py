@@ -10,8 +10,9 @@ from .utils import get_initial_bearing
 
 @dataclass
 class QuadrantData:
-    """One quadrant's display data: label, arrow, and upcoming departures."""
+    """One quadrant's display data: key, label, arrow, and upcoming departures."""
 
+    key: str
     label: str
     arrow: str
     departures: list[tuple[int, str]]  # (minutes_until, line_name)
@@ -78,4 +79,7 @@ def filter_and_group(
     for key in groups:
         groups[key] = sorted(groups[key], key=lambda x: x[0])[:max_per_quadrant]
 
-    return [QuadrantData(label=q["label"], arrow=q["direction"], departures=groups[q["key"]]) for q in quadrants_config]
+    return [
+        QuadrantData(key=q["key"], label=q["label"], arrow=q["direction"], departures=groups[q["key"]])
+        for q in quadrants_config
+    ]
