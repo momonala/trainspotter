@@ -20,6 +20,17 @@ const WHEEL_ITEM_PX = 60; // keep in sync with --schedule-wheel-item-height in d
 const BERLIN_TZ = 'Europe/Berlin';
 const OVERLAY_CLOSE_MS = 200;
 
+// Ordered Mon→Sun for display; stored as JS dow (0=Sun, 1=Mon … 6=Sat).
+const DAYS_OF_WEEK = [
+    { dow: 1, label: 'Mo' },
+    { dow: 2, label: 'Tu' },
+    { dow: 3, label: 'We' },
+    { dow: 4, label: 'Th' },
+    { dow: 5, label: 'Fr' },
+    { dow: 6, label: 'Sa' },
+    { dow: 0, label: 'Su' },
+];
+
 // =============================================================================
 // State
 // =============================================================================
@@ -512,7 +523,7 @@ async function refresh() {
         state.lastUpdatedAt = Date.now();
         renderQuadrants(data);
         updateLastUpdated();
-        console.info(`🚆 updated — station: ${data.station_name}, stale: ${data.used_fallback}`);
+        console.info(`[refresh] updated — station: ${data.station_name}, stale: ${data.used_fallback}`);
     } catch (err) {
         const copy = describeDisplayFetchError(err);
         // Hard error only when we've never had good data; otherwise keep last display intact
@@ -638,12 +649,41 @@ function berlinTomorrowDateString(date = new Date()) {
     return berlinDateString(new Date(date.getTime() + 86_400_000));
 }
 
+/** Berlin calendar date i days from now (handles DST by anchoring to noon UTC). */
+function berlinDatePlusDays(i) {
+    const { year, month, day } = berlinParts();
+    return berlinDateString(new Date(Date.UTC(year, month - 1, day + i, 12, 0, 0)));
+}
+
+/** Berlin day-of-week (0=Sun … 6=Sat, JS standard) derived from the Berlin calendar date. */
+function berlinDayOfWeek(date = new Date()) {
+    const { year, month, day } = berlinParts(date);
+    return new Date(year, month - 1, day).getDay();
+}
+
 /** If target time has already passed today in Berlin, schedule for tomorrow. */
 function resolveTargetDate(targetMinutes) {
     if (targetMinutes <= berlinNowMinutes()) {
         return berlinTomorrowDateString();
     }
     return berlinDateString();
+}
+
+/**
+ * Next Berlin date (YYYY-MM-DD) on which any of repeatDays fires.
+ * Checks today first (if targetMinutes hasn't passed yet), then searches up to 7 days ahead.
+ */
+function nextRepeatDate(repeatDays, targetMinutes) {
+    const todayDow = berlinDayOfWeek();
+    if (repeatDays.includes(todayDow) && targetMinutes > berlinNowMinutes()) {
+        return berlinDateString();
+    }
+    for (let i = 1; i <= 7; i++) {
+        if (repeatDays.includes((todayDow + i) % 7)) {
+            return berlinDatePlusDays(i);
+        }
+    }
+    throw new Error(`nextRepeatDate: repeatDays is empty or unreachable`);
 }
 
 function berlinTargetMs(targetDate, targetMinutes) {
@@ -662,7 +702,10 @@ function berlinTargetMs(targetDate, targetMinutes) {
 }
 
 function scheduleTargetMs(schedule) {
-    return berlinTargetMs(schedule.targetDate, schedule.targetMinutes);
+    const targetDate = schedule.repeatDays?.length
+        ? nextRepeatDate(schedule.repeatDays, schedule.targetMinutes)
+        : schedule.targetDate;
+    return berlinTargetMs(targetDate, schedule.targetMinutes);
 }
 
 function loadSchedules() {
@@ -677,6 +720,7 @@ function loadSchedules() {
     schedules = schedules.map(s => ({
         ...s,
         targetDate: s.targetDate ?? today,
+        repeatDays: s.repeatDays ?? [],
     }));
 }
 
@@ -686,12 +730,6 @@ function saveSchedulesToStorage() {
     } catch (err) {
         console.error('🗓 failed to persist schedules', err);
     }
-}
-
-function addSchedule(schedule) {
-    schedules.push(schedule);
-    saveSchedulesToStorage();
-    renderScheduleBadges();
 }
 
 function removeSchedule(id) {
@@ -708,6 +746,15 @@ function formatScheduleLabel(schedule) {
     const h = String(Math.floor(schedule.targetMinutes / 60)).padStart(2, '0');
     const m = String(schedule.targetMinutes % 60).padStart(2, '0');
     const time = `${h}:${m} ${schedule.arrow}`;
+
+    if (schedule.repeatDays?.length) {
+        const dayStr = DAYS_OF_WEEK
+            .filter(d => schedule.repeatDays.includes(d.dow))
+            .map(d => d.label)
+            .join(' ');
+        return `${time} · ${dayStr}`;
+    }
+
     const today = berlinDateString();
     if (schedule.targetDate && schedule.targetDate !== today) {
         const suffix = schedule.targetDate === berlinTomorrowDateString() ? 'tomorrow' : schedule.targetDate;
@@ -727,20 +774,21 @@ function renderScheduleBadges() {
         badge.className = 'schedule-badge';
         badge.dataset.scheduleId = schedule.id;
 
-        const text = document.createElement('span');
-        text.className = 'schedule-badge__text';
-        text.textContent = label;
+        const editBtn = document.createElement('button');
+        editBtn.className = 'schedule-badge__edit';
+        editBtn.type = 'button';
+        editBtn.setAttribute('aria-label', `Edit reminder ${label}`);
+        editBtn.textContent = label;
+        editBtn.addEventListener('click', () => openScheduleModal(schedule.id));
 
         const removeBtn = document.createElement('button');
         removeBtn.className = 'schedule-badge__remove';
         removeBtn.type = 'button';
         removeBtn.setAttribute('aria-label', `Remove reminder ${label}`);
         removeBtn.textContent = '×';
-        removeBtn.addEventListener('click', () => {
-            removeSchedule(schedule.id);
-        });
+        removeBtn.addEventListener('click', () => removeSchedule(schedule.id));
 
-        badge.append(text, removeBtn);
+        badge.append(editBtn, removeBtn);
         container.appendChild(badge);
     }
 }
@@ -749,7 +797,9 @@ function renderScheduleBadges() {
 // Scheduler — modal
 // =============================================================================
 
+let scheduleModalEditId = null;
 let scheduleModalSelectedQuadrantKey = null;
+let scheduleModalSelectedDays = new Set();
 
 function berlinNow() {
     const { hours, minutes } = berlinParts();
@@ -789,6 +839,14 @@ function readSelectedTargetMinutes() {
 function updateScheduleDateHint() {
     const hint = document.getElementById('schedule-date-hint');
     if (!hint) return;
+    if (scheduleModalSelectedDays.size > 0) {
+        const dayStr = DAYS_OF_WEEK
+            .filter(d => scheduleModalSelectedDays.has(d.dow))
+            .map(d => d.label)
+            .join(' ');
+        hint.textContent = `Repeats: ${dayStr}`;
+        return;
+    }
     const targetMinutes = readSelectedTargetMinutes();
     const targetDate = resolveTargetDate(targetMinutes);
     hint.textContent = targetDate === berlinDateString() ? 'Today' : 'Tomorrow';
@@ -855,13 +913,55 @@ function buildQuadrantPicker() {
     }
 }
 
-function openScheduleModal() {
+function buildDayPicker() {
+    const grid = document.getElementById('schedule-day-grid');
+    if (!grid) return;
+    grid.innerHTML = '';
+
+    for (const { dow, label } of DAYS_OF_WEEK) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'schedule-day-btn';
+        btn.textContent = label;
+        btn.setAttribute('aria-pressed', String(scheduleModalSelectedDays.has(dow)));
+        if (scheduleModalSelectedDays.has(dow)) btn.classList.add('selected');
+
+        btn.addEventListener('click', () => {
+            if (scheduleModalSelectedDays.has(dow)) {
+                scheduleModalSelectedDays.delete(dow);
+                btn.classList.remove('selected');
+                btn.setAttribute('aria-pressed', 'false');
+            } else {
+                scheduleModalSelectedDays.add(dow);
+                btn.classList.add('selected');
+                btn.setAttribute('aria-pressed', 'true');
+            }
+            updateScheduleDateHint();
+        });
+
+        grid.appendChild(btn);
+    }
+}
+
+function openScheduleModal(editId = null) {
     const overlay = document.getElementById('schedule-overlay');
     if (!overlay) return;
 
-    scheduleModalSelectedQuadrantKey = null;
+    const editing = editId ? schedules.find(s => s.id === editId) : null;
+
+    scheduleModalEditId = editId ?? null;
+    scheduleModalSelectedQuadrantKey = editing?.quadrantKey ?? null;
+    scheduleModalSelectedDays = new Set(editing?.repeatDays ?? []);
+
+    const title = document.getElementById('schedule-modal-title');
+    if (title) title.textContent = editing ? 'Edit Reminder' : 'Schedule Reminder';
+
     const saveBtn = document.getElementById('schedule-save-btn');
-    if (saveBtn) saveBtn.disabled = true;
+    if (saveBtn) {
+        saveBtn.textContent = editing ? 'Update' : 'Save';
+        // Enabled when editing (quadrant already set); disabled until quadrant picked for new
+        saveBtn.disabled = !scheduleModalSelectedQuadrantKey;
+    }
 
     // Build wheels
     const hourWheel = document.getElementById('schedule-wheel-hour');
@@ -869,8 +969,10 @@ function openScheduleModal() {
     if (hourWheel) buildWheelItems(hourWheel, 24, 2);
     if (minWheel) buildWheelItems(minWheel, 60, 2);
 
-    // Default to current Berlin time
-    const { hours, minutes } = berlinNow();
+    const { hours, minutes } = editing
+        ? { hours: Math.floor(editing.targetMinutes / 60), minutes: editing.targetMinutes % 60 }
+        : berlinNow();
+
     if (hourWheel) {
         hourWheel.onscroll = throttledUpdateScheduleDateHint;
         requestAnimationFrame(() => scrollWheelTo(hourWheel, hours));
@@ -881,14 +983,11 @@ function openScheduleModal() {
     }
 
     updateScheduleDateHint();
-
-    // Build quadrant picker from live data
+    buildDayPicker();
     buildQuadrantPicker();
 
     overlay.hidden = false;
     overlay.classList.remove('closing');
-
-    // Focus the save button for keyboard users
     requestAnimationFrame(() => saveBtn?.focus());
 }
 
@@ -900,26 +999,40 @@ function saveSchedule() {
     if (!scheduleModalSelectedQuadrantKey) return;
 
     unlockAudio();
+
     const targetMinutes = readSelectedTargetMinutes();
-    const targetDate = resolveTargetDate(targetMinutes);
+    const repeatDays = [...scheduleModalSelectedDays];
+    // One-time schedules store a concrete date; repeating schedules compute it dynamically.
+    const targetDate = repeatDays.length ? null : resolveTargetDate(targetMinutes);
 
     const quadrantData = state.quadrantsByKey.get(scheduleModalSelectedQuadrantKey)
         ?? state.lastData?.quadrants?.find(q => q.key === scheduleModalSelectedQuadrantKey);
     if (!quadrantData) return;
 
-    const schedule = {
-        id: crypto.randomUUID(),
+    const fields = {
         targetMinutes,
         targetDate,
+        repeatDays,
         quadrantKey: quadrantData.key,
         label: quadrantData.label,
         arrow: quadrantData.arrow,
         activeDepartureKey: null,
     };
 
-    addSchedule(schedule);
+    if (scheduleModalEditId) {
+        const idx = schedules.findIndex(s => s.id === scheduleModalEditId);
+        if (idx !== -1) schedules[idx] = { ...schedules[idx], ...fields };
+    } else {
+        schedules.push({ id: crypto.randomUUID(), ...fields });
+    }
+
+    saveSchedulesToStorage();
+    renderScheduleBadges();
     closeScheduleModal();
-    console.info('🗓 Schedule saved:', formatScheduleLabel(schedule));
+    const saved = scheduleModalEditId
+        ? schedules.find(s => s.id === scheduleModalEditId)
+        : schedules[schedules.length - 1];
+    console.info(`🗓 Schedule ${scheduleModalEditId ? 'updated' : 'saved'}: ${formatScheduleLabel(saved)}`);
 }
 
 // =============================================================================
@@ -946,7 +1059,6 @@ function pickDepartureForSchedule(schedule, quadrant, nowMs) {
     const targetMinutesFromNow = Math.round((targetMs - nowMs) / 60_000);
 
     if (targetMs <= nowMs) {
-        console.debug(`🗓 [pick] schedule "${formatScheduleLabel(schedule)}" target is in the past, skipping`);
         return null;
     }
 
@@ -956,9 +1068,6 @@ function pickDepartureForSchedule(schedule, quadrant, nowMs) {
     for (const dep of (quadrant.departures ?? [])) {
         const depMs = departureMsFromFloorMinutes(dep, nowMs);
         const inWindow = depMs >= earliestMs && depMs <= targetMs;
-        console.debug(
-            `🗓 [pick] dep ${dep.line} in ${dep.minutes}min — depMs offset: ${Math.round((depMs - nowMs) / 60_000)}min, window: [${Math.round((earliestMs - nowMs) / 60_000)}, ${targetMinutesFromNow}]min — inWindow: ${inWindow}`,
-        );
 
         if (!inWindow) continue;
 
@@ -967,7 +1076,6 @@ function pickDepartureForSchedule(schedule, quadrant, nowMs) {
         }
     }
 
-    console.debug(`🗓 [pick] ideal: ${ideal ? `${ideal.dep.line} in ${ideal.dep.minutes}min` : 'none'}`);
     return ideal?.dep ?? null;
 }
 
@@ -987,8 +1095,6 @@ function evaluateSchedules() {
             continue;
         }
 
-        console.debug(`🗓 [eval] schedule "${formatScheduleLabel(schedule)}" → quadrant "${quadrant.key}" has ${quadrant.departures.length} departure(s): ${quadrant.departures.map(d => `${d.line}@${d.minutes}min`).join(', ')}`);
-
         const pick = pickDepartureForSchedule(schedule, quadrant, nowMs);
 
         if (!pick) {
@@ -1007,11 +1113,10 @@ function evaluateSchedules() {
         schedule.activeDepartureKey = newKey;
 
         if (zoom.active && !isUpgrade) {
-            console.debug(`🗓 [eval] zoom already open, not interrupting for "${newKey}"`);
             continue;
         }
 
-        console.info(`🗓 [eval] auto-zoom for schedule "${formatScheduleLabel(schedule)}" → ${newKey} (upgrade: ${isUpgrade})`);
+        console.info(`[evaluateSchedules] auto-zoom for schedule "${formatScheduleLabel(schedule)}" → ${newKey} (upgrade: ${isUpgrade})`);
 
         if (isUpgrade) {
             // Better train found — soft beep then switch
