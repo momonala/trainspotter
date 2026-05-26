@@ -14,6 +14,7 @@ from src.datamodels import Station
 from src.departures_fallback import _snapshots_by_station_id
 from src.departures_fallback import get_fallback_departures
 from src.departures_fallback import get_snapshot_age_hhmmss
+from src.departures_fallback import get_snapshot_diagnostics
 from src.departures_fallback import store_departures_snapshot
 
 TEST_STATION_ID = "900110011"
@@ -103,6 +104,19 @@ def test_get_snapshot_age_hhmmss_formats_elapsed_time():
     now = captured_at + timedelta(hours=1, minutes=2, seconds=3)
     store_departures_snapshot(TEST_STATION_ID, [_build_departure(captured_at, 20)], captured_at)
     assert get_snapshot_age_hhmmss(TEST_STATION_ID, now) == "01:02:03"
+
+
+def test_get_snapshot_diagnostics_returns_metadata():
+    captured_at = BASE_TIME_UTC
+    now = captured_at + timedelta(minutes=4, seconds=5)
+    departures = [_build_departure(captured_at, 20), _build_departure(captured_at, 30)]
+    store_departures_snapshot(TEST_STATION_ID, departures, captured_at)
+
+    diagnostics = get_snapshot_diagnostics(TEST_STATION_ID, now)
+    assert diagnostics is not None
+    assert diagnostics["snapshot_age"] == "00:04:05"
+    assert diagnostics["departure_count"] == 2
+    assert diagnostics["captured_at"] == captured_at.isoformat()
 
 
 def test_get_fallback_departures_shifts_and_filters_passed_departures():

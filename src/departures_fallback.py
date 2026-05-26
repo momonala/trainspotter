@@ -34,13 +34,23 @@ def store_departures_snapshot(station_id: str, departures: list[Departure], capt
     )
 
 
-def get_snapshot_age_hhmmss(station_id: str, current_time_utc: datetime) -> str | None:
-    """Return snapshot age as HH:MM:SS for logging, if present."""
+def get_snapshot_diagnostics(station_id: str, current_time_utc: datetime) -> dict | None:
+    """Return snapshot metadata for client-facing diagnostics."""
     snapshot = _snapshots_by_station_id.get(station_id)
     if snapshot is None:
         return None
     elapsed_seconds = int((current_time_utc - snapshot.captured_at_utc).total_seconds())
-    return _format_hhmmss(elapsed_seconds)
+    return {
+        "snapshot_age": _format_hhmmss(elapsed_seconds),
+        "departure_count": len(snapshot.departures),
+        "captured_at": snapshot.captured_at_utc.isoformat(),
+    }
+
+
+def get_snapshot_age_hhmmss(station_id: str, current_time_utc: datetime) -> str | None:
+    """Return snapshot age as HH:MM:SS for logging, if present."""
+    diagnostics = get_snapshot_diagnostics(station_id, current_time_utc)
+    return diagnostics["snapshot_age"] if diagnostics else None
 
 
 def _shift_departure_times(snapshot: CachedDeparturesSnapshot, current_time_utc: datetime) -> list[Departure]:

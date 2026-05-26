@@ -39,6 +39,9 @@ const state = {
     lastData: null,
     lastUpdatedAt: null,
     quadrantsByKey: new Map(),
+    lastRenderedSnapshot: null,
+    lastAgedElapsedMin: null,
+    lastError: null,
 };
 
 // Zoom modal state
@@ -71,7 +74,7 @@ function describeDisplayFetchError(err) {
     if (err.name === 'AbortError') {
         return {
             title: `Client timeout (${DISPLAY_CONFIG.FETCH_TIMEOUT_MS / 1000}s)`,
-            subtitle: 'GET /api/display/data aborted — server may still log 502 if VBB is slow',
+            subtitle: 'GET /api/display/data aborted — server VBB fetch uses 5s timeout × up to 3 retries (~15s)',
             badge: '⚠\u2009fetch timeout',
         };
     }
@@ -128,6 +131,7 @@ async function fetchDisplayData() {
             err.httpStatus = resp.status;
             err.serverError = body.error ?? null;
             err.serverDetail = body.detail ?? null;
+            err.serverDiagnostics = body.diagnostics ?? null;
             throw err;
         }
         return await resp.json();
@@ -149,6 +153,56 @@ async function fetchDisplayData() {
 }
 
 // =============================================================================
+// Stale-data aging (client-side when polls fail or between refreshes)
+// =============================================================================
+
+/** JSON snapshot of quadrant departures — used to skip redundant re-renders. */
+function departuresSnapshot(quadrants) {
+    return JSON.stringify(
+        (quadrants ?? []).map(q =>
+            (q.departures ?? []).map(dep => `${dep.line}:${dep.minutes}`),
+        ),
+    );
+}
+
+/**
+ * Shift floor-minute departures forward by elapsed time since last fetch and
+ * drop trains that are no longer catchable (same min_departure_min gate as server).
+ */
+function ageDisplayData(data, fetchedAtMs, nowMs = Date.now()) {
+    if (!data || fetchedAtMs == null) return data;
+
+    const elapsedMin = Math.floor((nowMs - fetchedAtMs) / 60_000);
+    const minMinutes = data.min_departure_min ?? 5;
+
+    const quadrants = (data.quadrants ?? []).map(q => ({
+        ...q,
+        departures: (q.departures ?? [])
+            .map(dep => ({ ...dep, minutes: dep.minutes - elapsedMin }))
+            .filter(dep => dep.minutes > minMinutes),
+    }));
+
+    return { ...data, quadrants };
+}
+
+function renderAgedQuadrantsIfNeeded(nowMs = Date.now()) {
+    if (!state.lastData || state.lastUpdatedAt == null) return;
+
+    const elapsedMin = Math.floor((nowMs - state.lastUpdatedAt) / 60_000);
+    if (elapsedMin === state.lastAgedElapsedMin) return;
+
+    const aged = ageDisplayData(state.lastData, state.lastUpdatedAt, nowMs);
+    rebuildQuadrantIndex(aged);
+
+    const snapshot = departuresSnapshot(aged.quadrants);
+    state.lastAgedElapsedMin = elapsedMin;
+    if (snapshot === state.lastRenderedSnapshot) return;
+
+    state.lastRenderedSnapshot = snapshot;
+    renderQuadrants(aged);
+}
+
+// =============================================================================
 // Clock & last-updated ticker
 // =============================================================================
 
@@ -163,14 +217,18 @@ function updateClock() {
     });
 }
 
-function formatAgo(fromDate) {
+function formatRelativeAgo(fromDate) {
     if (!fromDate) return '';
-    let secs = Math.max(0, Math.floor((Date.now() - fromDate) / 1000));
+    const secs = Math.max(0, Math.floor((Date.now() - fromDate) / 1000));
     const m = Math.floor(secs / 60);
     const s = secs % 60;
     const pad = n => String(n).padStart(2, '0');
-    const label = m > 0 ? `${m}:${pad(s)} ago` : `${s}s ago`;
-    return `(last updated ${label})`;
+    return m > 0 ? `${m}:${pad(s)} ago` : `${s}s ago`;
+}
+
+function formatAgo(fromDate) {
+    const label = formatRelativeAgo(fromDate);
+    return label ? `(last updated ${label})` : '';
 }
 
 function updateLastUpdated() {
@@ -433,49 +491,63 @@ function createQuadrant(quadrant, quadrantIndex) {
     return el;
 }
 
+function updateStatusBadge(data = state.lastData) {
+    const staleBadge = document.getElementById('stale-badge');
+    if (!staleBadge) return;
+
+    if (state.lastError) {
+        staleBadge.classList.add('visible');
+        staleBadge.textContent = state.lastError.badge;
+    } else if (data?.used_fallback) {
+        staleBadge.classList.add('visible');
+        staleBadge.textContent = '⚠\u2009stale snapshot · VBB unreachable';
+    } else {
+        staleBadge.classList.remove('visible');
+        staleBadge.textContent = '⚠\u2009stale data';
+    }
+}
+
 /** Render all four quadrants into the grid. */
 function renderQuadrants(data) {
     const grid = document.getElementById('display-grid');
     if (!grid) return;
 
-    // Station title
     const titleEl = document.getElementById('station-title');
     if (titleEl) titleEl.textContent = data.station_name;
 
-    // Stale badge — 200 with used_fallback means VBB down but snapshot served
-    const staleBadge = document.getElementById('stale-badge');
-    if (staleBadge) {
-        if (data.used_fallback) {
-            staleBadge.classList.add('visible');
-            staleBadge.textContent = '⚠\u2009stale snapshot · VBB unreachable';
-        } else {
-            staleBadge.classList.remove('visible');
-            staleBadge.textContent = '⚠\u2009stale data';
-        }
-    }
+    updateStatusBadge(data);
 
-    // Rebuild quadrant cards — pass index for the cascade stagger
     grid.innerHTML = '';
     (data.quadrants || []).forEach((q, i) => grid.appendChild(createQuadrant(q, i)));
+}
+
+function recordFetchError(err, copy) {
+    state.lastError = {
+        ...copy,
+        at: Date.now(),
+        err,
+        consecutiveFailures: (state.lastError?.consecutiveFailures ?? 0) + 1,
+    };
+}
+
+function clearFetchError() {
+    state.lastError = null;
 }
 
 /**
  * Render a full-grid error state.
  * If we already have good data, leave the quadrants intact and only
- * update the stale badge — the last known departures are better than nothing.
+ * update the stale badge — aged departures are pruned separately.
  * @param {{ title: string, subtitle: string, badge: string }} copy
  * @param {boolean} isHard - true when no prior data exists (show full error card)
  */
 function showError(copy, isHard = false) {
     console.error(`🚆 ${copy.title} — ${copy.subtitle}`);
 
-    // Soft error: keep last good data on screen, just update the stale badge
+    // Soft error: keep last good data on screen, prune departed trains, update badge
     if (state.lastData && !isHard) {
-        const staleBadge = document.getElementById('stale-badge');
-        if (staleBadge) {
-            staleBadge.classList.add('visible');
-            staleBadge.textContent = copy.badge;
-        }
+        updateStatusBadge();
+        renderAgedQuadrantsIfNeeded();
         return;
     }
 
@@ -508,6 +580,94 @@ function showError(copy, isHard = false) {
 }
 
 // =============================================================================
+// Diagnostics modal (stale / error badge tap)
+// =============================================================================
+
+function formatDiagnosticsValue(value) {
+    if (value == null) return '—';
+    if (typeof value === 'object') return JSON.stringify(value, null, 2);
+    return String(value);
+}
+
+function buildDiagnosticLines() {
+    const lines = [];
+    const fetchError = state.lastError;
+    const raw = fetchError?.err;
+    const diag = raw?.serverDiagnostics ?? state.lastData?.diagnostics;
+
+    if (fetchError) {
+        lines.push(['Issue', fetchError.title]);
+        lines.push(['Summary', fetchError.subtitle]);
+        if (raw?.httpStatus != null) lines.push(['HTTP status', String(raw.httpStatus)]);
+        if (raw?.serverError) lines.push(['Server error', raw.serverError]);
+        if (raw?.serverDetail) lines.push(['Server detail', raw.serverDetail]);
+        if (raw?.message && raw.message !== raw.serverError) lines.push(['Message', raw.message]);
+        lines.push(['Consecutive failures', String(fetchError.consecutiveFailures)]);
+        if (fetchError.at) {
+            lines.push(['Last failure', new Date(fetchError.at).toLocaleString('de-DE', { timeZone: BERLIN_TZ })]);
+        }
+    } else if (state.lastData?.used_fallback) {
+        lines.push(['Issue', 'Serving stale snapshot']);
+        lines.push(['Summary', 'VBB unreachable — departures time-shifted from last successful fetch']);
+    } else {
+        lines.push(['Issue', 'No active fetch error']);
+    }
+
+    if (diag) {
+        if (diag.station_id) lines.push(['Station ID', diag.station_id]);
+        if (diag.vbb_error) lines.push(['VBB error', diag.vbb_error]);
+        if (diag.snapshot) {
+            lines.push(['Snapshot age', diag.snapshot.snapshot_age ?? '—']);
+            lines.push(['Snapshot captured', diag.snapshot.captured_at ?? '—']);
+            lines.push(['Snapshot departures', String(diag.snapshot.departure_count ?? '—')]);
+        }
+    }
+
+    if (state.lastUpdatedAt) {
+        lines.push(['Last successful fetch', formatRelativeAgo(new Date(state.lastUpdatedAt))]);
+        lines.push(['Last fetch at', new Date(state.lastUpdatedAt).toLocaleString('de-DE', { timeZone: BERLIN_TZ })]);
+    }
+    if (state.lastData?.timestamp) lines.push(['Server timestamp', state.lastData.timestamp]);
+    if (state.lastData?.used_fallback != null) lines.push(['used_fallback', String(state.lastData.used_fallback)]);
+
+    lines.push(['Client fetch timeout', `${DISPLAY_CONFIG.FETCH_TIMEOUT_MS / 1000}s`]);
+    lines.push(['Poll interval', `${DISPLAY_CONFIG.REFRESH_INTERVAL_MS / 1000}s`]);
+    lines.push(['Endpoint', 'GET /api/display/data']);
+
+    return lines;
+}
+
+function openDiagnosticsModal() {
+    const overlay = document.getElementById('diagnostics-overlay');
+    const body = document.getElementById('diagnostics-body');
+    if (!overlay || !body) return;
+
+    body.innerHTML = '';
+    for (const [label, value] of buildDiagnosticLines()) {
+        const row = document.createElement('div');
+        row.className = 'diagnostics-row';
+
+        const labelEl = document.createElement('dt');
+        labelEl.className = 'diagnostics-row__label';
+        labelEl.textContent = label;
+
+        const valueEl = document.createElement('dd');
+        valueEl.className = 'diagnostics-row__value';
+        valueEl.textContent = formatDiagnosticsValue(value);
+
+        row.append(labelEl, valueEl);
+        body.appendChild(row);
+    }
+
+    overlay.hidden = false;
+    overlay.classList.remove('closing');
+}
+
+function closeDiagnosticsModal() {
+    closeOverlay(document.getElementById('diagnostics-overlay'));
+}
+
+// =============================================================================
 // Data loop
 // =============================================================================
 
@@ -519,13 +679,17 @@ async function refresh() {
     try {
         const data = await fetchDisplayData();
         state.lastData = data;
+        clearFetchError();
         rebuildQuadrantIndex(data);
         state.lastUpdatedAt = Date.now();
+        state.lastAgedElapsedMin = null;
+        state.lastRenderedSnapshot = departuresSnapshot(data.quadrants);
         renderQuadrants(data);
         updateLastUpdated();
         console.info(`[refresh] updated — station: ${data.station_name}, stale: ${data.used_fallback}`);
     } catch (err) {
         const copy = describeDisplayFetchError(err);
+        recordFetchError(err, copy);
         // Hard error only when we've never had good data; otherwise keep last display intact
         showError(copy, /* isHard */ !state.lastData);
     }
@@ -545,6 +709,7 @@ window.addEventListener('DOMContentLoaded', () => {
         updateClock();
         updateLastUpdated();
         updateZoomDisplay();
+        renderAgedQuadrantsIfNeeded();
         evaluateSchedules();
     }, DISPLAY_CONFIG.CLOCK_INTERVAL_MS);
 
@@ -567,7 +732,17 @@ window.addEventListener('DOMContentLoaded', () => {
         if (e.key === 'Escape') {
             closeZoom();
             closeScheduleModal();
+            closeDiagnosticsModal();
         }
+    });
+
+    document.getElementById('stale-badge')?.addEventListener('click', () => {
+        if (!document.getElementById('stale-badge')?.classList.contains('visible')) return;
+        openDiagnosticsModal();
+    });
+    document.getElementById('diagnostics-close-btn')?.addEventListener('click', closeDiagnosticsModal);
+    document.getElementById('diagnostics-overlay')?.addEventListener('click', e => {
+        if (e.target === e.currentTarget) closeDiagnosticsModal();
     });
 
     // Schedule button

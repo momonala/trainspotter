@@ -219,6 +219,8 @@ def test_api_display_data_returns_expected_shape(mock_trains, mock_filter, clien
     assert "walk_time" in data
     assert "timestamp" in data
     assert "used_fallback" in data
+    assert "min_departure_min" in data
+    assert "diagnostics" in data
     assert "quadrants" in data
     assert isinstance(data["quadrants"], list)
 
@@ -286,3 +288,6 @@ def test_api_display_data_returns_502_when_no_fallback_available(
         response = client.get(f"/api/display/data?station_id={TEST_STATION_ID}")
 
     assert response.status_code == 502
+    body = response.get_json()
+    assert "diagnostics" in body
+    assert body["diagnostics"]["station_id"] is not None

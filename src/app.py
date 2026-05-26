@@ -15,7 +15,7 @@ from .config import FLASK_PORT
 from .datamodels import Departure
 from .datamodels import Station
 from .departures_fallback import get_fallback_departures
-from .departures_fallback import get_snapshot_age_hhmmss
+from .departures_fallback import get_snapshot_diagnostics
 from .departures_fallback import store_departures_snapshot
 from .quadrants import filter_and_group
 from .utils import config
@@ -115,30 +115,42 @@ def api_stations():
     return jsonify({"stations": station_data, "config": config})
 
 
-def _fetch_display_departures(station_id: str, now: datetime, cache_key: str) -> tuple[list[Departure], bool] | None:
-    """Return departures and stale-fallback flag, or None when no valid data exists."""
+def _attach_snapshot_diagnostics(diagnostics: dict, station_id: str, now: datetime) -> None:
+    snapshot = get_snapshot_diagnostics(station_id, now)
+    if snapshot is not None:
+        diagnostics["snapshot"] = snapshot
+
+
+def _fetch_display_departures(
+    station_id: str, now: datetime, cache_key: str
+) -> tuple[list[Departure] | None, bool, dict]:
+    """Return departures (or None), stale-fallback flag, and diagnostics."""
+    diagnostics: dict = {"station_id": station_id}
     try:
         fresh_departures = get_inbound_trains_cached(station_id, cache_key) or []
         store_departures_snapshot(station_id, fresh_departures, now)
         logger.debug("[_fetch_display_departures] fresh station_id=%s count=%d", station_id, len(fresh_departures))
-        return fresh_departures, False
-    except VBBAPIError:
+        _attach_snapshot_diagnostics(diagnostics, station_id, now)
+        return fresh_departures, False, diagnostics
+    except VBBAPIError as error:
+        diagnostics["vbb_error"] = str(error)
+        _attach_snapshot_diagnostics(diagnostics, station_id, now)
         fallback_departures = get_fallback_departures(station_id, now)
         if fallback_departures is None:
             logger.error(
                 "❌ [_fetch_display_departures] VBB unreachable and no cached snapshot for station %s — display will return 502",
                 station_id,
             )
-            return None
+            return None, False, diagnostics
 
-        age = get_snapshot_age_hhmmss(station_id, now) or "unknown"
+        age = (diagnostics.get("snapshot") or {}).get("snapshot_age") or "unknown"
         logger.warning(
             "⚠️  [_fetch_display_departures] VBB unreachable, serving stale snapshot station_id=%s age=%s count=%d",
             station_id,
             age,
             len(fallback_departures),
         )
-        return fallback_departures, True
+        return fallback_departures, True, diagnostics
 
 
 @app.route("/api/display/data")
@@ -150,12 +162,19 @@ def api_display_data():
     cache_key = now.strftime("%Y%m%d%H%M%S")[:-1]
 
     try:
-        fetch_result = _fetch_display_departures(station_id, now, cache_key)
-        if fetch_result is None:
+        departures, used_fallback, diagnostics = _fetch_display_departures(station_id, now, cache_key)
+        if departures is None:
             logger.error("❌ [/api/display/data] returning 502 — VBB down, no snapshot for station %s", station_id)
-            return make_response(jsonify({"error": "VBB unreachable", "detail": "No cached snapshot available"}), 502)
-
-        departures, used_fallback = fetch_result
+            return make_response(
+                jsonify(
+                    {
+                        "error": "VBB unreachable",
+                        "detail": "No cached snapshot with future departures available",
+                        "diagnostics": diagnostics,
+                    }
+                ),
+                502,
+            )
         quadrants_data = filter_and_group(
             departures,
             now,
@@ -173,6 +192,8 @@ def api_display_data():
                 "walk_time": walk_time,
                 "timestamp": timestamp.isoformat(),
                 "used_fallback": used_fallback,
+                "min_departure_min": config["min_departure_time_min"],
+                "diagnostics": diagnostics,
                 "quadrants": [
                     {
                         "key": q.key,

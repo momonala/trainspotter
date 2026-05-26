@@ -122,10 +122,20 @@ body::before {
     font-size: 11px;
     font-weight: 500;
     letter-spacing: 0.2px;
+    font-family: inherit;
+    cursor: pointer;
 }
 
 .stale-badge.visible {
     display: flex;
+}
+
+.stale-badge.visible:hover {
+    filter: brightness(1.08);
+}
+
+.stale-badge.visible:active {
+    transform: scale(0.98);
 }
 
 .header-time {
@@ -637,6 +647,57 @@ body::before {
     color: var(--d-text);
     letter-spacing: -0.3px;
     margin: 0;
+}
+
+.modal-card--diagnostics {
+    gap: 20px;
+    padding: 32px 36px 28px;
+    background: rgba(14, 14, 26, 0.92);
+    min-width: 320px;
+    max-width: min(90vw, 520px);
+}
+
+.diagnostics-body {
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    max-height: 50vh;
+    overflow-y: auto;
+}
+
+.diagnostics-row {
+    display: grid;
+    grid-template-columns: 140px 1fr;
+    gap: 12px;
+    align-items: start;
+}
+
+.diagnostics-row__label {
+    margin: 0;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--d-text-secondary);
+    letter-spacing: 0.2px;
+}
+
+.diagnostics-row__value {
+    margin: 0;
+    font-size: 12px;
+    font-weight: 400;
+    color: var(--d-text);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.schedule-modal-actions--end {
+    justify-content: flex-end;
+}
+
+.schedule-modal-actions--end .schedule-action-btn {
+    flex: 0 1 auto;
+    min-width: 120px;
 }
 
 /* Time picker row */

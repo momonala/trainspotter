@@ -17,9 +17,10 @@
             <span class="station-title" id="station-title" aria-label="Station name">—</span>
             <div class="schedule-badges" id="schedule-badges" aria-label="Scheduled reminders"></div>
             <div class="header-right">
-                <span class="stale-badge" id="stale-badge" role="status" aria-live="polite">
+                <button type="button" class="stale-badge" id="stale-badge"
+                        aria-live="polite" aria-label="Fetch status — tap for details">
                     ⚠&thinsp;stale data
-                </span>
+                </button>
                 <time class="header-time" id="header-time" aria-label="Current time"></time>
                 <span class="last-updated-ago" id="last-updated-ago" aria-live="polite"></span>
                 <button id="schedule-btn" class="icon-button" aria-label="Schedule train reminder" type="button">
@@ -110,6 +111,19 @@
                         class="schedule-action-btn schedule-action-btn--cancel">Cancel</button>
                 <button type="button" id="schedule-save-btn"
                         class="schedule-action-btn schedule-action-btn--save" disabled>Save</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Diagnostics modal — shown when stale/error badge is tapped -->
+    <div class="modal-overlay diagnostics-overlay" id="diagnostics-overlay" hidden
+         role="dialog" aria-modal="true" aria-labelledby="diagnostics-modal-title">
+        <div class="modal-card modal-card--diagnostics" id="diagnostics-modal-card">
+            <h2 class="schedule-modal-title" id="diagnostics-modal-title">Fetch diagnostics</h2>
+            <dl class="diagnostics-body" id="diagnostics-body"></dl>
+            <div class="schedule-modal-actions schedule-modal-actions--end">
+                <button type="button" id="diagnostics-close-btn"
+                        class="schedule-action-btn schedule-action-btn--save">Close</button>
             </div>
         </div>
     </div>
