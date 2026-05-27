@@ -14,6 +14,7 @@ from .datamodels import Departure
 from .datamodels import Station
 from .datamodels import parse_departures
 from .datamodels import parse_stations
+from .observability import metrics
 
 logger = logging.getLogger(__name__)
 logging.getLogger("urllib3.connectionpool").setLevel(logging.ERROR)
@@ -41,7 +42,7 @@ def _load_station_snapshot(path: Path) -> list[dict]:
 
 _STATIONS_PATH = Path(__file__).resolve().parent.parent / "data" / "vbb_stations.json"
 _ALL_STATIONS: list[dict] = _load_station_snapshot(_STATIONS_PATH)
-logger.info("[vbb_api] Loaded %d stations from %s", len(_ALL_STATIONS), _STATIONS_PATH.name)
+logger.info("Loaded %d stations from %s", len(_ALL_STATIONS), _STATIONS_PATH.name)
 
 # Configure requests session with retries and timeouts
 session = requests.Session()
@@ -98,45 +99,54 @@ def get_nearby_stations(coordinates: tuple[float, float] | None = None) -> list[
     """Return the closest stops from the local snapshot within straight-line radius, S-Bahn first."""
     if coordinates is not None:
         lat, lon = coordinates
-        logger.debug("[get_nearby_stations] Using provided coordinates: %s", coordinates)
+        logger.debug("Using provided coordinates: %s", coordinates)
     else:
         lat = config["location"]["latitude"]
         lon = config["location"]["longitude"]
-        logger.debug("[get_nearby_stations] Using config coordinates: (%s, %s)", lat, lon)
+        logger.debug("Using config coordinates: (%s, %s)", lat, lon)
     nearest = _rank_stops_by_distance(_ALL_STATIONS, lat, lon, MAX_NEARBY_STATIONS, _MAX_STRAIGHTLINE_DISTANCE_M)
     station_dicts = [{**stop, "distance": int(round(meters))} for meters, stop in nearest]
     parsed = parse_stations(station_dicts)
     parsed.sort(key=_suburban_first_sort_key)
-    logger.info("[get_nearby_stations] Found %d nearby stations", len(parsed))
+    logger.info("Found %d nearby stations", len(parsed))
     return parsed
 
 
 @lru_cache(maxsize=32)
-def get_inbound_trains_cached(station_id: str, timestamp: str) -> list[Departure]:
-    """Cached version of get_inbound_trains."""
+def _fetch_departures_from_vbb(station_id: str, timestamp: str) -> list[Departure]:
+    """Fetch departures from VBB (LRU-cached by station and 30s bucket)."""
     try:
-        logger.debug("[get_inbound_trains_cached] Fetching departures for station %s...", station_id)
-        departures_resp = session.get(
-            f"https://v6.vbb.transport.rest/stops/{station_id}/departures",
-            params={
-                "duration": config["update_interval_min"],
-                "linesOfStops": False,
-                "remarks": False,
-                "language": "en",
-            },
-            timeout=TIMEOUT,
-        )
-        departures_resp.raise_for_status()
-        departures_data = departures_resp.json()
-        parsed_departures = parse_departures(departures_data)
-        logger.debug(
-            "[get_inbound_trains_cached] Found %d departures for station %s", len(parsed_departures), station_id
-        )
-        return parsed_departures
+        with metrics.timed("vbb.fetch"):
+            departures_resp = session.get(
+                f"https://v6.vbb.transport.rest/stops/{station_id}/departures",
+                params={
+                    "duration": config["update_interval_min"],
+                    "linesOfStops": False,
+                    "remarks": False,
+                    "language": "en",
+                },
+                timeout=TIMEOUT,
+            )
+            departures_resp.raise_for_status()
+            departures_data = departures_resp.json()
+        return parse_departures(departures_data)
 
     except requests.RequestException as e:
-        logger.debug("[get_inbound_trains_cached] Failed to get departures for station %s: %s", station_id, e)
+        metrics.increment("vbb.error")
         raise VBBAPIError(f"VBB API error: {e}") from e
+
+
+def get_inbound_trains_cached(station_id: str, timestamp: str) -> list[Departure]:
+    """Cached version of get_inbound_trains."""
+    before = _fetch_departures_from_vbb.cache_info()
+    try:
+        return _fetch_departures_from_vbb(station_id, timestamp)
+    finally:
+        after = _fetch_departures_from_vbb.cache_info()
+        if after.hits > before.hits:
+            metrics.increment("vbb.cache_hit")
+        elif after.misses > before.misses:
+            metrics.increment("vbb.cache_miss")
 
 
 def vbb_cache_timestamp(now: datetime | None = None) -> str:

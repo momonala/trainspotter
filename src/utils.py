@@ -15,7 +15,6 @@ from .datamodels import Departure
 from .datamodels import Station
 from .values import GMAPS_API_KEY
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Cache in parent directory
@@ -38,7 +37,7 @@ def _get_walk_time_gmaps(origin: tuple[float, float], destination: tuple[float, 
     duration_sec = result[0]["legs"][0]["duration"]["value"]
     duration_min = duration_sec / 60
     logger.info(
-        "[_get_walk_time_gmaps] Google Maps walking time for %s: %.1f minutes between %s and %s",
+        "Google Maps walking time for %s: %.1f minutes between %s and %s",
         station_name,
         duration_min,
         origin,
@@ -60,7 +59,7 @@ def get_walk_time(station: Station, current_coordinates: tuple[float, float] | N
     """Get configured walk time for a station."""
     walk_time = get_configured_walk_time(station.name)
     if walk_time is not None:
-        logger.debug("[get_walk_time] Station %s is configured with walk time %d minutes", station.name, walk_time)
+        logger.debug("Station %s is configured with walk time %d minutes", station.name, walk_time)
         return walk_time
     else:
         destination_coordinates = (round(station.location.latitude, 4), round(station.location.longitude, 4))

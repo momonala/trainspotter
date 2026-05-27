@@ -17,6 +17,7 @@ from src.datamodels import Location
 from src.datamodels import Operator
 from src.datamodels import Products
 from src.datamodels import Station
+from src.observability.schemas import SpyglassStatus
 from src.vbb_api import VBBAPIError
 
 TEST_STATION_ID = "900110011"
@@ -202,6 +203,40 @@ def test_display_route_renders_html(client):
     response = client.get("/display")
     assert response.status_code == 200
     assert b"<!DOCTYPE html>" in response.data or b"<html" in response.data
+
+
+def test_observability_route_renders_html(client):
+    response = client.get("/observability")
+    assert response.status_code == 200
+    assert b"Observability" in response.data
+
+
+@patch("src.app.fetch_logs", return_value=[])
+@patch("src.app.fetch_metrics", return_value=[])
+@patch(
+    "src.app.fetch_spyglass_status",
+    return_value=SpyglassStatus(reachable=True, status={"status": "ok"}),
+)
+def test_api_observability_summary_returns_expected_shape(
+    mock_status,
+    mock_metrics,
+    mock_logs,
+    client,
+):
+    response = client.get("/api/observability/summary?amount=6&unit=hours&rollup=auto")
+    assert response.status_code == 200
+    data = response.get_json()
+    assert data["display_status"]["status"] == "fresh"
+    assert "display" in data
+    assert "vbb" in data
+    assert "charts" in data
+    assert "logs" in data
+    assert "window" in data
+    assert data["window"] == {"amount": 6, "unit": "hours", "hours": 6, "rollup_minutes": 15}
+    assert "latency_p50_ms" in data["charts"]
+    assert "routes" not in data
+    assert "app_state" not in data
+    assert "recent_alerts" not in data
 
 
 # =============================================================================

@@ -13,7 +13,9 @@ with _config_file.open("rb") as f:
 _project_config = _config["project"]
 _tool_config = _config["tool"]["config"]
 
+PROJECT_NAME = _project_config["name"]
 FLASK_PORT = _tool_config["flask_port"]
+SPYGLASS_HOST = _tool_config["spyglass_host"]
 
 _json_config_file = Path(__file__).parent.parent / "config.json"
 with _json_config_file.open("r") as f:
@@ -30,21 +32,24 @@ gmaps_api_key = GMAPS_API_KEY
 # fmt: off
 def config_cli(
     all: bool = typer.Option(False, "--all", help="Show all configuration values"),
-    project_name: bool = typer.Option(False, "--project-name", help=_project_config['name']),
+    project_name: bool = typer.Option(False, "--project-name", help=PROJECT_NAME),
     project_version: bool = typer.Option(False, "--project-version", help=_project_config['version']),
     flask_port: bool = typer.Option(False, "--flask-port", help=str(FLASK_PORT)),
+    spyglass_host: bool = typer.Option(False, "--spyglass-host", help=SPYGLASS_HOST),
 ) -> None:
 # fmt: on
     if all:
-        typer.echo(f"project_name={_project_config['name']}")
+        typer.echo(f"project_name={PROJECT_NAME}")
         typer.echo(f"project_version={_project_config['version']}")
         typer.echo(f"flask_port={FLASK_PORT}")
+        typer.echo(f"spyglass_host={SPYGLASS_HOST}")
         return
 
     param_map = {
-        project_name: _project_config["name"],
+        project_name: PROJECT_NAME,
         project_version: _project_config["version"],
         flask_port: FLASK_PORT,
+        spyglass_host: SPYGLASS_HOST,
     }
 
     for is_set, value in param_map.items():

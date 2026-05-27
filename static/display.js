@@ -5,7 +5,7 @@
 // =============================================================================
 
 const DISPLAY_CONFIG = {
-    FETCH_TIMEOUT_MS:    18000,
+    FETCH_TIMEOUT_MS:    30000,
     REFRESH_INTERVAL_MS: 30000,
     CLOCK_INTERVAL_MS:   1000,
     LAST_UPDATED_FRESH_SEC: 30,
@@ -75,9 +75,10 @@ function describeDisplayFetchError(err) {
     const status = err.httpStatus != null ? Number(err.httpStatus) : null;
 
     if (err.name === 'AbortError') {
+        const timeoutMs = DISPLAY_CONFIG.FETCH_TIMEOUT_MS / 1000;
         return {
-            title: `Client timeout (${DISPLAY_CONFIG.FETCH_TIMEOUT_MS / 1000}s)`,
-            subtitle: 'GET /api/display/data aborted — server VBB fetch uses 5s timeout × up to 3 retries (~15s)',
+            title: `Client timeout (${timeoutMs}s)`,
+            subtitle: 'GET /api/display/data client timeout · VBB fetch timed out after ${timeoutMs}s',
             badge: '⚠\u2009fetch timeout',
         };
     }
@@ -85,7 +86,7 @@ function describeDisplayFetchError(err) {
     if (status === 502) {
         const detail = err.serverDetail || 'No cached snapshot available';
         return {
-            title: '502 · VBB unreachable',
+            title: '502 · VBB unreachable · No cached snapshot available',
             subtitle: [err.serverError, detail].filter(Boolean).join(' — '),
             badge: '⚠\u2009502 · VBB down',
         };

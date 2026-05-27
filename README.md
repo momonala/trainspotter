@@ -18,6 +18,11 @@ trainspotter/
 │   ├── datamodels.py           # Dataclasses: Station, Departure, Line, Location, Products, Color, Operator
 │   ├── quadrants.py            # Filter departures by quadrant config, group into QuadrantData
 │   ├── departures_fallback.py  # In-memory snapshot fallback for display when VBB is unreachable
+│   ├── observability/          # Observability package (Spyglass metrics + dashboard aggregation)
+│   │   ├── __init__.py         # Public observability exports used by app modules
+│   │   ├── metrics.py          # Spyglass configure_logging, metrics collector, request decorator
+│   │   ├── schemas.py          # Pydantic models for observability API payloads
+│   │   └── view.py             # Spyglass fetch helpers and observability summary builders
 │   ├── config.py               # Typed config accessors (reads pyproject.toml + config.json); exposes FLASK_PORT
 │   ├── trainspotter.py         # CLI terminal view (standalone, no server)
 │   └── values.example.py       # Template for values.py (git-ignored); set GMAPS_API_KEY here

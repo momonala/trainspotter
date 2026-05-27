@@ -1,10 +1,12 @@
 import logging
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
+from datetime import timedelta
 from datetime import timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+import requests
 from flask import Flask
 from flask import jsonify
 from flask import make_response
@@ -17,6 +19,18 @@ from .datamodels import Station
 from .departures_fallback import get_fallback_departures
 from .departures_fallback import get_snapshot_diagnostics
 from .departures_fallback import store_departures_snapshot
+from .observability import DEFAULT_ROLLUP
+from .observability import DEFAULT_WINDOW_AMOUNT
+from .observability import build_summary
+from .observability import fetch_logs
+from .observability import fetch_metrics
+from .observability import fetch_spyglass_status
+from .observability import metrics
+from .observability import parse_rollup
+from .observability import parse_window_amount
+from .observability import parse_window_unit
+from .observability import track_request
+from .observability import window_hours_from
 from .quadrants import filter_and_group
 from .utils import config
 from .utils import get_configured_walk_time
@@ -29,10 +43,10 @@ from .vbb_api import get_inbound_trains_cached
 from .vbb_api import get_nearby_stations
 from .vbb_api import vbb_cache_timestamp
 
+logger = logging.getLogger(__name__)
+
 basedir = Path(__file__).parent.parent
 app = Flask(__name__, template_folder=str(basedir / "templates"), static_folder=str(basedir / "static"))
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 logging.getLogger("werkzeug").setLevel(logging.WARNING)
 
 # Global state
@@ -83,6 +97,46 @@ def display():
     return render_template("display.html", asset_version=asset_version)
 
 
+@app.route("/observability")
+def observability():
+    """Render the observability dashboard."""
+    asset_version = int(datetime.now(timezone.utc).timestamp())
+    return render_template("observability.html", asset_version=asset_version)
+
+
+@app.route("/api/observability/summary")
+def api_observability_summary():
+    """Return aggregated Spyglass metrics and logs for the observability dashboard."""
+    amount = parse_window_amount(request.args.get("amount", default=DEFAULT_WINDOW_AMOUNT, type=int))
+    unit = parse_window_unit(request.args.get("unit", default="hours", type=str))
+    rollup = parse_rollup(request.args.get("rollup", default=DEFAULT_ROLLUP, type=str))
+    window_hours = window_hours_from(amount, unit)
+    since = datetime.now(timezone.utc) - timedelta(hours=window_hours)
+
+    spyglass_status = fetch_spyglass_status()
+    metrics_data: list[dict] = []
+    logs_data: list[dict] = []
+
+    if spyglass_status.reachable:
+        try:
+            metrics_data = fetch_metrics(since)
+            logs_data = fetch_logs(since)
+        except requests.RequestException as error:
+            logger.exception("Spyglass query failed: %s", error)
+            return make_response(jsonify({"error": "Failed to query Spyglass", "detail": str(error)}), 502)
+
+    return jsonify(
+        build_summary(
+            metrics=metrics_data,
+            logs=logs_data,
+            window_amount=amount,
+            window_unit=unit,
+            rollup=rollup,
+            spyglass_status=spyglass_status,
+        ).model_dump()
+    )
+
+
 @app.route("/api/location", methods=["POST"])
 def api_location():
     """Receive and log location data from browser."""
@@ -94,11 +148,12 @@ def api_location():
         round(latitude, COORDINATE_ACCURACY_DECIMALS),
         round(longitude, COORDINATE_ACCURACY_DECIMALS),
     )
-    logger.info("[/api/location] %s", browser_coordinates)
+    logger.info("Received coordinates %s", browser_coordinates)
     return jsonify({"status": "success"})
 
 
 @app.route("/api/stations")
+@track_request("stations")
 def api_stations():
     """Return station and train data as JSON."""
     global browser_coordinates, cached_stations
@@ -108,10 +163,11 @@ def api_stations():
     if cached_stations is None or refresh:
         nearby = get_nearby_stations(browser_coordinates)
         cached_stations = nearby[:max_stations] if max_stations else nearby
-        logger.info("[/api/stations] %s %d stations", "Refreshed" if refresh else "Fetched", len(cached_stations))
+        logger.info("%s %d stations", "Refreshed" if refresh else "Fetched", len(cached_stations))
     else:
-        logger.info("[/api/stations] Using %d cached stations", len(cached_stations))
+        logger.info("Using %d cached stations", len(cached_stations))
 
+    metrics.gauge("dashboard.stations_fetched", len(cached_stations))
     station_data = _build_station_board_rows(cached_stations, browser_coordinates)
     return jsonify({"stations": station_data, "config": config})
 
@@ -130,23 +186,32 @@ def _fetch_display_departures(
     try:
         fresh_departures = get_inbound_trains_cached(station_id, cache_key) or []
         store_departures_snapshot(station_id, fresh_departures, now)
-        logger.debug("[_fetch_display_departures] fresh station_id=%s count=%d", station_id, len(fresh_departures))
+        metrics.increment("display.fresh")
         _attach_snapshot_diagnostics(diagnostics, station_id, now)
         return fresh_departures, False, diagnostics
     except VBBAPIError as error:
+        logger.exception("VBB API error: %s", error)
         diagnostics["vbb_error"] = str(error)
         _attach_snapshot_diagnostics(diagnostics, station_id, now)
         fallback_departures = get_fallback_departures(station_id, now)
         if fallback_departures is None:
+            metrics.increment("display.no_snapshot")
             logger.error(
-                "❌ [_fetch_display_departures] VBB unreachable and no cached snapshot for station %s — display will return 502",
+                "5XX VBB unreachable, no cached snapshot for station %s",
                 station_id,
             )
             return None, False, diagnostics
 
-        age = (diagnostics.get("snapshot") or {}).get("snapshot_age") or "unknown"
+        metrics.increment("display.fallback")
+        snapshot_info = diagnostics.get("snapshot") or {}
+        captured_at = snapshot_info.get("captured_at")
+        if captured_at is not None:
+            age_seconds = int((now - datetime.fromisoformat(captured_at)).total_seconds())
+            metrics.gauge("display.snapshot_age_seconds", age_seconds)
+
+        age = snapshot_info.get("snapshot_age") or "unknown"
         logger.warning(
-            "⚠️  [_fetch_display_departures] VBB unreachable, serving stale snapshot station_id=%s age=%s count=%d",
+            "Serving stale snapshot station_id=%s age=%s count=%d",
             station_id,
             age,
             len(fallback_departures),
@@ -155,6 +220,7 @@ def _fetch_display_departures(
 
 
 @app.route("/api/display/data")
+@track_request("display_data")
 def api_display_data():
     """Return quadrant departure data for the fixed display station as JSON."""
     display_config = config["display"]
@@ -165,7 +231,7 @@ def api_display_data():
     try:
         departures, used_fallback, diagnostics = _fetch_display_departures(station_id, now, cache_key)
         if departures is None:
-            logger.error("❌ [/api/display/data] returning 502 — VBB down, no snapshot for station %s", station_id)
+            metrics.increment("response.502", tags={"route": "display_data"})
             return make_response(
                 jsonify(
                     {
@@ -207,12 +273,12 @@ def api_display_data():
             }
         )
     except Exception as error:
-        logger.exception("[/api/display/data] failed: %s", error)
+        logger.exception("Failed to fetch display data: %s", error)
         return make_response(jsonify({"error": "Failed to fetch display data", "detail": str(error)}), 500)
 
 
 def main():
-    logger.info("[main] Starting server at http://localhost:%s", FLASK_PORT)
+    logger.info("Starting server at http://localhost:%s", FLASK_PORT)
     app.run(host="0.0.0.0", port=FLASK_PORT, debug=True)
 
 

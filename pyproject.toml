@@ -26,10 +26,13 @@ dependencies = [
     "isort>=7.0.0",
     "typer>=0.9.0",
     "freezegun>=1.5.5",
+    "spyglass",
+    "pydantic>=2.13.4",
 ]
 
 [tool.config]
 flask_port = 5007
+spyglass_host = "localhost:5013"
 
 [build-system]
 requires = ["hatchling"]
@@ -82,3 +85,6 @@ exclude_lines = [
 
 [tool.uv]
 exclude-newer = "1 week"
+
+[tool.uv.sources]
+spyglass = { git = "https://github.com/momonala/spyglass.git", rev = "main" }
