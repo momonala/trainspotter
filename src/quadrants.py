@@ -5,6 +5,7 @@ from datetime import datetime
 
 from .datamodels import Departure
 from .utils import bearing_to_cardinal
+from .utils import get_direction
 from .utils import get_initial_bearing
 
 
@@ -22,20 +23,10 @@ def compute_direction(dep: Departure) -> str | None:
     """Return direction symbol (↑ ↓ ↻ ↺ ← →) from departure bearing and line, or None if unknown."""
     if not dep.stop or not dep.stop.location or not dep.destination or not dep.destination.location:
         return None
-    line = dep.line.name
     start = dep.stop.location
     end = dep.destination.location
     bearing = get_initial_bearing(start.latitude, start.longitude, end.latitude, end.longitude)
-    cardinal = bearing_to_cardinal(bearing)
-    if line == "S41":
-        return "↻"
-    if line == "S42":
-        return "↺"
-    if cardinal in ("→", "↓") and line in ("S8", "S85"):
-        return "↻"
-    if cardinal == "←" and line == "S1":
-        return "↓"
-    return cardinal
+    return get_direction(dep.line.name, bearing_to_cardinal(bearing))
 
 
 def filter_and_group(

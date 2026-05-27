@@ -8,6 +8,8 @@ const DISPLAY_CONFIG = {
     FETCH_TIMEOUT_MS:    18000,
     REFRESH_INTERVAL_MS: 30000,
     CLOCK_INTERVAL_MS:   1000,
+    LAST_UPDATED_FRESH_SEC: 30,
+    LAST_UPDATED_STALE_SEC: 60,
 };
 
 const SCHEDULE_CONFIG = {
@@ -48,7 +50,6 @@ const state = {
 const zoom = {
     active: false,
     departureTime: null,  // absolute ms — computed when zoom opens
-    line: null,
     alarmArmed: false,    // flips false once alarm fires (threshold: 7 min)
     autoCloseArmed: false,// flips false once auto-dismiss fires (threshold: 5 min)
 };
@@ -57,6 +58,8 @@ let alarmTimerId = null;
 let alarmAutoStopId = null;  // clears the alarm sound after 60 s
 let audioCtx = null;         // shared context — must be created inside a user gesture
 let muted = localStorage.getItem('alarmMuted') === 'true';
+let refreshInFlight = false;
+const warnedMissingQuadrantKeys = new Set();
 
 // =============================================================================
 // API
@@ -192,12 +195,11 @@ function renderAgedQuadrantsIfNeeded(nowMs = Date.now()) {
     if (elapsedMin === state.lastAgedElapsedMin) return;
 
     const aged = ageDisplayData(state.lastData, state.lastUpdatedAt, nowMs);
-    rebuildQuadrantIndex(aged);
-
     const snapshot = departuresSnapshot(aged.quadrants);
     state.lastAgedElapsedMin = elapsedMin;
     if (snapshot === state.lastRenderedSnapshot) return;
 
+    rebuildQuadrantIndex(aged);
     state.lastRenderedSnapshot = snapshot;
     renderQuadrants(aged);
 }
@@ -217,35 +219,39 @@ function updateClock() {
     });
 }
 
-function formatRelativeAgo(fromDate) {
-    if (!fromDate) return '';
-    const secs = Math.max(0, Math.floor((Date.now() - fromDate) / 1000));
+function formatRelativeAgo(fromMs) {
+    if (fromMs == null) return '';
+    const secs = Math.max(0, Math.floor((Date.now() - fromMs) / 1000));
     const m = Math.floor(secs / 60);
     const s = secs % 60;
     const pad = n => String(n).padStart(2, '0');
     return m > 0 ? `${m}:${pad(s)} ago` : `${s}s ago`;
 }
 
-function formatAgo(fromDate) {
-    const label = formatRelativeAgo(fromDate);
-    return label ? `(last updated ${label})` : '';
-}
-
-function lastUpdatedAgoClass(fromMs) {
-    if (fromMs == null) return null;
-    const secs = Math.max(0, Math.floor((Date.now() - fromMs) / 1000));
-    if (secs <= 30) return 'last-updated-ago--fresh';
-    if (secs <= 60) return 'last-updated-ago--stale';
-    return 'last-updated-ago--old';
-}
-
 function updateLastUpdated() {
     const el = document.getElementById('last-updated-ago');
     if (!el) return;
-    el.textContent = formatAgo(state.lastUpdatedAt);
+
+    if (state.lastUpdatedAt == null) {
+        el.textContent = '';
+        el.classList.remove('last-updated-ago--fresh', 'last-updated-ago--stale', 'last-updated-ago--old');
+        return;
+    }
+
+    const secs = Math.max(0, Math.floor((Date.now() - state.lastUpdatedAt) / 1000));
+    const m = Math.floor(secs / 60);
+    const s = secs % 60;
+    const pad = n => String(n).padStart(2, '0');
+    const label = m > 0 ? `${m}:${pad(s)} ago` : `${s}s ago`;
+    el.textContent = `(last updated ${label})`;
     el.classList.remove('last-updated-ago--fresh', 'last-updated-ago--stale', 'last-updated-ago--old');
-    const freshnessClass = lastUpdatedAgoClass(state.lastUpdatedAt);
-    if (freshnessClass) el.classList.add(freshnessClass);
+    if (secs <= DISPLAY_CONFIG.LAST_UPDATED_FRESH_SEC) {
+        el.classList.add('last-updated-ago--fresh');
+    } else if (secs <= DISPLAY_CONFIG.LAST_UPDATED_STALE_SEC) {
+        el.classList.add('last-updated-ago--stale');
+    } else {
+        el.classList.add('last-updated-ago--old');
+    }
 }
 
 // =============================================================================
@@ -353,7 +359,6 @@ function openZoom(dep, arrow) {
     unlockAudio();  // must happen inside tap handler so iOS allows audio
     zoom.active = true;
     zoom.departureTime = departureMsFromFloorMinutes(dep);
-    zoom.line = dep.line;
     zoom.alarmArmed = dep.minutes > 7;      // arm alarm threshold (7 min)
     zoom.autoCloseArmed = dep.minutes > 5;  // arm auto-dismiss threshold (5 min)
 
@@ -515,7 +520,6 @@ function updateStatusBadge(data = state.lastData) {
         staleBadge.textContent = '⚠\u2009stale snapshot · VBB unreachable';
     } else {
         staleBadge.classList.remove('visible');
-        staleBadge.textContent = '⚠\u2009stale data';
     }
 }
 
@@ -540,10 +544,6 @@ function recordFetchError(err, copy) {
         err,
         consecutiveFailures: (state.lastError?.consecutiveFailures ?? 0) + 1,
     };
-}
-
-function clearFetchError() {
-    state.lastError = null;
 }
 
 /**
@@ -636,7 +636,7 @@ function buildDiagnosticLines() {
     }
 
     if (state.lastUpdatedAt) {
-        lines.push(['Last successful fetch', formatRelativeAgo(new Date(state.lastUpdatedAt))]);
+        lines.push(['Last successful fetch', formatRelativeAgo(state.lastUpdatedAt)]);
         lines.push(['Last fetch at', new Date(state.lastUpdatedAt).toLocaleString('de-DE', { timeZone: BERLIN_TZ })]);
     }
     if (state.lastData?.timestamp) lines.push(['Server timestamp', state.lastData.timestamp]);
@@ -688,11 +688,14 @@ function rebuildQuadrantIndex(data) {
 }
 
 async function refresh() {
+    if (refreshInFlight) return;
+    refreshInFlight = true;
     try {
         const data = await fetchDisplayData();
         state.lastData = data;
-        clearFetchError();
+        state.lastError = null;
         rebuildQuadrantIndex(data);
+        warnedMissingQuadrantKeys.clear();
         state.lastUpdatedAt = Date.now();
         state.lastAgedElapsedMin = null;
         state.lastRenderedSnapshot = departuresSnapshot(data.quadrants);
@@ -704,6 +707,8 @@ async function refresh() {
         recordFetchError(err, copy);
         // Hard error only when we've never had good data; otherwise keep last display intact
         showError(copy, /* isHard */ !state.lastData);
+    } finally {
+        refreshInFlight = false;
     }
     // Run outside the try/catch so schedule errors don't masquerade as fetch failures.
     evaluateSchedules();
@@ -748,8 +753,9 @@ window.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    document.getElementById('stale-badge')?.addEventListener('click', () => {
-        if (!document.getElementById('stale-badge')?.classList.contains('visible')) return;
+    document.getElementById('stale-badge')?.addEventListener('click', e => {
+        const badge = e.currentTarget;
+        if (!badge.classList.contains('visible')) return;
         openDiagnosticsModal();
     });
     document.getElementById('diagnostics-close-btn')?.addEventListener('click', closeDiagnosticsModal);
@@ -798,17 +804,19 @@ window.addEventListener('DOMContentLoaded', () => {
  */
 let schedules = [];
 
+const berlinDateTimeFormat = new Intl.DateTimeFormat('en-US', {
+    timeZone: BERLIN_TZ,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+});
+
 function berlinParts(date = new Date()) {
     const parts = Object.fromEntries(
-        new Intl.DateTimeFormat('en-US', {
-            timeZone: BERLIN_TZ,
-            year: 'numeric',
-            month: '2-digit',
-            day: '2-digit',
-            hour: '2-digit',
-            minute: '2-digit',
-            hour12: false,
-        })
+        berlinDateTimeFormat
             .formatToParts(date)
             .filter(part => part.type !== 'literal')
             .map(part => [part.type, part.value]),
@@ -1243,7 +1251,6 @@ function departureKey(dep) {
  */
 function pickDepartureForSchedule(schedule, quadrant, nowMs) {
     const targetMs = scheduleTargetMs(schedule);
-    const targetMinutesFromNow = Math.round((targetMs - nowMs) / 60_000);
 
     if (targetMs <= nowMs) {
         return null;
@@ -1278,7 +1285,10 @@ function evaluateSchedules() {
     for (const schedule of schedules) {
         const quadrant = state.quadrantsByKey.get(schedule.quadrantKey);
         if (!quadrant) {
-            console.warn(`🗓 [eval] no quadrant found for key "${schedule.quadrantKey}" — available: ${[...state.quadrantsByKey.keys()].join(', ')}`);
+            if (!warnedMissingQuadrantKeys.has(schedule.quadrantKey)) {
+                warnedMissingQuadrantKeys.add(schedule.quadrantKey);
+                console.warn(`🗓 [eval] no quadrant found for key "${schedule.quadrantKey}" — available: ${[...state.quadrantsByKey.keys()].join(', ')}`);
+            }
             continue;
         }
 

@@ -426,8 +426,6 @@ body::before {
     50%       { opacity: 0.70; transform: scale(1.05); }
 }
 
-/* ── Landscape-specific adjustments ──────────────────────── */
-
 /* ── Zoom modal ───────────────────────────────────────────── */
 
 .modal-overlay {

@@ -27,6 +27,7 @@ from .vbb_api import VBBAPIError
 from .vbb_api import get_inbound_trains
 from .vbb_api import get_inbound_trains_cached
 from .vbb_api import get_nearby_stations
+from .vbb_api import vbb_cache_timestamp
 
 basedir = Path(__file__).parent.parent
 app = Flask(__name__, template_folder=str(basedir / "templates"), static_folder=str(basedir / "static"))
@@ -159,7 +160,7 @@ def api_display_data():
     display_config = config["display"]
     station_id = display_config["station_id"]
     now = datetime.now(timezone.utc)
-    cache_key = now.strftime("%Y%m%d%H%M%S")[:-1]
+    cache_key = vbb_cache_timestamp(now)
 
     try:
         departures, used_fallback, diagnostics = _fetch_display_departures(station_id, now, cache_key)

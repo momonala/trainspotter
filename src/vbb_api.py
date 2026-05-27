@@ -139,9 +139,13 @@ def get_inbound_trains_cached(station_id: str, timestamp: str) -> list[Departure
         raise VBBAPIError(f"VBB API error: {e}") from e
 
 
+def vbb_cache_timestamp(now: datetime | None = None) -> str:
+    """Return a cache bucket timestamp that changes every 30 seconds."""
+    if now is None:
+        now = datetime.now()
+    return now.strftime("%Y%m%d%H%M") + ("30" if now.second >= 30 else "00")
+
+
 def get_inbound_trains(station: Station) -> list[Departure]:
     """Get inbound trains for a given station."""
-    # Create a timestamp that changes every 30 seconds for caching
-    now = datetime.now()
-    timestamp = now.strftime("%Y%m%d%H%M") + ("30" if now.second >= 30 else "00")
-    return get_inbound_trains_cached(station.id, timestamp)
+    return get_inbound_trains_cached(station.id, vbb_cache_timestamp())
