@@ -231,9 +231,21 @@ function formatAgo(fromDate) {
     return label ? `(last updated ${label})` : '';
 }
 
+function lastUpdatedAgoClass(fromMs) {
+    if (fromMs == null) return null;
+    const secs = Math.max(0, Math.floor((Date.now() - fromMs) / 1000));
+    if (secs <= 30) return 'last-updated-ago--fresh';
+    if (secs <= 60) return 'last-updated-ago--stale';
+    return 'last-updated-ago--old';
+}
+
 function updateLastUpdated() {
     const el = document.getElementById('last-updated-ago');
-    if (el) el.textContent = formatAgo(state.lastUpdatedAt);
+    if (!el) return;
+    el.textContent = formatAgo(state.lastUpdatedAt);
+    el.classList.remove('last-updated-ago--fresh', 'last-updated-ago--stale', 'last-updated-ago--old');
+    const freshnessClass = lastUpdatedAgoClass(state.lastUpdatedAt);
+    if (freshnessClass) el.classList.add(freshnessClass);
 }
 
 // =============================================================================

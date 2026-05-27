@@ -30,6 +30,7 @@
     --d-text-tertiary:  rgba(255, 255, 255, 0.30);
 
     /* Accent */
+    --d-fresh-color:    rgba(80, 210, 120, 0.90);
     --d-stale-color:    rgba(255, 185, 40, 0.90);
     --d-stale-bg:       rgba(255, 185, 40, 0.12);
     --d-stale-border:   rgba(255, 185, 40, 0.30);
@@ -146,15 +147,19 @@ body::before {
     letter-spacing: 0.1px;
 }
 
-/* Last-updated ticker — red, after the clock */
+/* Last-updated ticker — colour reflects freshness, after the clock */
 .last-updated-ago {
     font-size: 12px;
     font-weight: 500;
-    color: var(--d-error-color);
+    color: var(--d-text-secondary);
     font-variant-numeric: tabular-nums;
     letter-spacing: 0.2px;
     white-space: nowrap;
 }
+
+.last-updated-ago--fresh { color: var(--d-fresh-color); }
+.last-updated-ago--stale { color: var(--d-stale-color); }
+.last-updated-ago--old   { color: var(--d-error-color); }
 
 /* Mute / unmute icon button */
 .icon-button {
