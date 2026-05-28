@@ -8,8 +8,6 @@ const DISPLAY_CONFIG = {
     FETCH_TIMEOUT_MS:    30000,
     REFRESH_INTERVAL_MS: 30000,
     CLOCK_INTERVAL_MS:   1000,
-    LAST_UPDATED_FRESH_SEC: 30,
-    LAST_UPDATED_STALE_SEC: 60,
 };
 
 const SCHEDULE_CONFIG = {
@@ -206,8 +204,61 @@ function renderAgedQuadrantsIfNeeded(nowMs = Date.now()) {
 }
 
 // =============================================================================
-// Clock & last-updated ticker
+// Display serving status (timer colour + header badge)
 // =============================================================================
+
+/** @typedef {'loading' | 'fresh' | 'stale' | 'error'} DisplayServingStatus */
+
+/**
+ * Derive UI state from data provenance, not poll recency alone.
+ * @returns {DisplayServingStatus}
+ */
+function resolveDisplayStatus() {
+    if (state.lastData) {
+        if (state.lastData.used_fallback || state.lastError) {
+            return 'stale';
+        }
+        return 'fresh';
+    }
+    if (state.lastError) {
+        return 'error';
+    }
+    return 'loading';
+}
+
+function formatRelativeAgo(fromMs) {
+    if (fromMs == null) return '';
+    const secs = Math.max(0, Math.floor((Date.now() - fromMs) / 1000));
+    const m = Math.floor(secs / 60);
+    const s = secs % 60;
+    const pad = n => String(n).padStart(2, '0');
+    return m > 0 ? `${m}:${pad(s)} ago` : `${s}s ago`;
+}
+
+function formatLastUpdatedLabel() {
+    if (state.lastUpdatedAt == null) return '';
+    return `(last updated ${formatRelativeAgo(state.lastUpdatedAt)})`;
+}
+
+/**
+ * @param {DisplayServingStatus} status
+ * @returns {string | null}
+ */
+function getStatusBadgeText(status) {
+    if (status === 'error') {
+        return state.lastError?.badge ?? '⚠\u2009no data';
+    }
+    if (status !== 'stale') {
+        return null;
+    }
+    if (state.lastError && state.lastData) {
+        if (state.lastData.used_fallback) {
+            return '⚠\u2009stale snapshot · can\u2019t refresh';
+        }
+        return '⚠\u2009can\u2019t refresh · showing last known';
+    }
+    return '⚠\u2009stale snapshot · VBB unreachable';
+}
 
 function updateClock() {
     const el = document.getElementById('header-time');
@@ -220,38 +271,52 @@ function updateClock() {
     });
 }
 
-function formatRelativeAgo(fromMs) {
-    if (fromMs == null) return '';
-    const secs = Math.max(0, Math.floor((Date.now() - fromMs) / 1000));
-    const m = Math.floor(secs / 60);
-    const s = secs % 60;
-    const pad = n => String(n).padStart(2, '0');
-    return m > 0 ? `${m}:${pad(s)} ago` : `${s}s ago`;
-}
+/** Sync header timer colour and status badge with resolveDisplayStatus(). */
+function updateDisplayStatus() {
+    const status = resolveDisplayStatus();
+    const timerEl = document.getElementById('last-updated-ago');
+    const badgeEl = document.getElementById('stale-badge');
 
-function updateLastUpdated() {
-    const el = document.getElementById('last-updated-ago');
-    if (!el) return;
-
-    if (state.lastUpdatedAt == null) {
-        el.textContent = '';
-        el.classList.remove('last-updated-ago--fresh', 'last-updated-ago--stale', 'last-updated-ago--old');
-        return;
+    if (timerEl) {
+        timerEl.classList.remove(
+            'last-updated-ago--fresh',
+            'last-updated-ago--stale',
+            'last-updated-ago--error',
+            'last-updated-ago--loading',
+        );
+        if (status === 'loading') {
+            timerEl.classList.add('last-updated-ago--loading');
+            timerEl.textContent = '';
+        } else if (status === 'fresh') {
+            timerEl.classList.add('last-updated-ago--fresh');
+            timerEl.textContent = formatLastUpdatedLabel();
+        } else if (status === 'stale') {
+            timerEl.classList.add('last-updated-ago--stale');
+            timerEl.textContent = formatLastUpdatedLabel();
+        } else {
+            timerEl.classList.add('last-updated-ago--error');
+            timerEl.textContent = state.lastUpdatedAt
+                ? formatLastUpdatedLabel()
+                : '(no data)';
+        }
     }
 
-    const secs = Math.max(0, Math.floor((Date.now() - state.lastUpdatedAt) / 1000));
-    const m = Math.floor(secs / 60);
-    const s = secs % 60;
-    const pad = n => String(n).padStart(2, '0');
-    const label = m > 0 ? `${m}:${pad(s)} ago` : `${s}s ago`;
-    el.textContent = `(last updated ${label})`;
-    el.classList.remove('last-updated-ago--fresh', 'last-updated-ago--stale', 'last-updated-ago--old');
-    if (secs <= DISPLAY_CONFIG.LAST_UPDATED_FRESH_SEC) {
-        el.classList.add('last-updated-ago--fresh');
-    } else if (secs <= DISPLAY_CONFIG.LAST_UPDATED_STALE_SEC) {
-        el.classList.add('last-updated-ago--stale');
-    } else {
-        el.classList.add('last-updated-ago--old');
+    if (badgeEl) {
+        const badgeText = getStatusBadgeText(status);
+        badgeEl.classList.remove('visible', 'stale-badge--error');
+        if (badgeText) {
+            badgeEl.classList.add('visible');
+            badgeEl.textContent = badgeText;
+            if (status === 'error') {
+                badgeEl.classList.add('stale-badge--error');
+            }
+            badgeEl.setAttribute(
+                'aria-label',
+                status === 'error' ? 'Error — tap for details' : 'Stale data — tap for details',
+            );
+        } else {
+            badgeEl.setAttribute('aria-label', 'Fetch status — tap for details');
+        }
     }
 }
 
@@ -509,21 +574,6 @@ function createQuadrant(quadrant, quadrantIndex) {
     return el;
 }
 
-function updateStatusBadge(data = state.lastData) {
-    const staleBadge = document.getElementById('stale-badge');
-    if (!staleBadge) return;
-
-    if (state.lastError) {
-        staleBadge.classList.add('visible');
-        staleBadge.textContent = state.lastError.badge;
-    } else if (data?.used_fallback) {
-        staleBadge.classList.add('visible');
-        staleBadge.textContent = '⚠\u2009stale snapshot · VBB unreachable';
-    } else {
-        staleBadge.classList.remove('visible');
-    }
-}
-
 /** Render all four quadrants into the grid. */
 function renderQuadrants(data) {
     const grid = document.getElementById('display-grid');
@@ -532,7 +582,7 @@ function renderQuadrants(data) {
     const titleEl = document.getElementById('station-title');
     if (titleEl) titleEl.textContent = data.station_name;
 
-    updateStatusBadge(data);
+    updateDisplayStatus();
 
     grid.innerHTML = '';
     (data.quadrants || []).forEach((q, i) => grid.appendChild(createQuadrant(q, i)));
@@ -557,9 +607,9 @@ function recordFetchError(err, copy) {
 function showError(copy, isHard = false) {
     console.error(`🚆 ${copy.title} — ${copy.subtitle}`);
 
-    // Soft error: keep last good data on screen, prune departed trains, update badge
+    // Soft error: keep last good data on screen, prune departed trains, update status
     if (state.lastData && !isHard) {
-        updateStatusBadge();
+        updateDisplayStatus();
         renderAgedQuadrantsIfNeeded();
         return;
     }
@@ -590,6 +640,7 @@ function showError(copy, isHard = false) {
 
     card.append(icon, title, sub);
     grid.appendChild(card);
+    updateDisplayStatus();
 }
 
 // =============================================================================
@@ -642,6 +693,7 @@ function buildDiagnosticLines() {
     }
     if (state.lastData?.timestamp) lines.push(['Server timestamp', state.lastData.timestamp]);
     if (state.lastData?.used_fallback != null) lines.push(['used_fallback', String(state.lastData.used_fallback)]);
+    lines.push(['Display status', resolveDisplayStatus()]);
 
     lines.push(['Client fetch timeout', `${DISPLAY_CONFIG.FETCH_TIMEOUT_MS / 1000}s`]);
     lines.push(['Poll interval', `${DISPLAY_CONFIG.REFRESH_INTERVAL_MS / 1000}s`]);
@@ -701,13 +753,13 @@ async function refresh() {
         state.lastAgedElapsedMin = null;
         state.lastRenderedSnapshot = departuresSnapshot(data.quadrants);
         renderQuadrants(data);
-        updateLastUpdated();
         console.info(`[refresh] updated — station: ${data.station_name}, stale: ${data.used_fallback}`);
     } catch (err) {
         const copy = describeDisplayFetchError(err);
         recordFetchError(err, copy);
         // Hard error only when we've never had good data; otherwise keep last display intact
         showError(copy, /* isHard */ !state.lastData);
+        updateDisplayStatus();
     } finally {
         refreshInFlight = false;
     }
@@ -722,10 +774,10 @@ async function refresh() {
 window.addEventListener('DOMContentLoaded', () => {
     loadSchedules();
     updateClock();
-    updateLastUpdated();
+    updateDisplayStatus();
     setInterval(() => {
         updateClock();
-        updateLastUpdated();
+        updateDisplayStatus();
         updateZoomDisplay();
         renderAgedQuadrantsIfNeeded();
         evaluateSchedules();

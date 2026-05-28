@@ -139,6 +139,16 @@ body::before {
     transform: scale(0.98);
 }
 
+.stale-badge--error {
+    background: rgba(255, 80, 80, 0.12);
+    border-color: rgba(255, 80, 80, 0.30);
+    color: var(--d-error-color);
+}
+
+.stale-badge--error.visible:hover {
+    filter: brightness(1.08);
+}
+
 .header-time {
     font-size: 15px;
     font-weight: 400;
@@ -147,7 +157,7 @@ body::before {
     letter-spacing: 0.1px;
 }
 
-/* Last-updated ticker — colour reflects freshness, after the clock */
+/* Last-updated ticker — colour matches serving status (fresh / stale / error) */
 .last-updated-ago {
     font-size: 12px;
     font-weight: 500;
@@ -157,9 +167,10 @@ body::before {
     white-space: nowrap;
 }
 
-.last-updated-ago--fresh { color: var(--d-fresh-color); }
-.last-updated-ago--stale { color: var(--d-stale-color); }
-.last-updated-ago--old   { color: var(--d-error-color); }
+.last-updated-ago--loading { color: var(--d-text-tertiary); }
+.last-updated-ago--fresh   { color: var(--d-fresh-color); }
+.last-updated-ago--stale   { color: var(--d-stale-color); }
+.last-updated-ago--error   { color: var(--d-error-color); }
 
 /* Mute / unmute icon button */
 .icon-button {

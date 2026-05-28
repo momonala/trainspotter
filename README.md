@@ -158,7 +158,7 @@ sequenceDiagram
 
 `GET /display` serves a full-viewport landscape HTML page. JavaScript polls `GET /api/display/data` every 30 seconds and re-evaluates scheduled reminders every 1 second (clock tick). The endpoint uses the fixed `station_id` from `config.json["display"]`, fetches departures (with in-memory fallback from `departures_fallback.py` on `VBBAPIError`), groups them into four quadrants, and returns JSON. The page renders a 2×2 quadrant grid with Apple Liquid Glass styling optimised for iPad mini in landscape mode.
 
-When stale fallback data is served, the response includes `"used_fallback": true` and the display shows a ⚠ indicator in the header.
+When stale fallback data is served, the response includes `"used_fallback": true`. The display header uses a green timer with no badge for live VBB data, yellow timer + yellow badge for stale or unrefreshable board data, and red timer + red badge when no departures can be shown (hard fetch error).
 
 ```mermaid
 sequenceDiagram
@@ -457,7 +457,7 @@ Flask port is set in `pyproject.toml` under `[tool.config]`.
 | `quadrants[].departures[].minutes` | Floor minutes until departure; matcher adds 59 s to align with zoom modal. |
 | `walk_time` | Dashboard parity only; scheduler does not use it (leave-home is the zoom alarm). |
 
-`used_fallback: true` means VBB was unreachable and time-shifted stale departures are being served. The display page shows a ⚠ stale-data badge in this case.
+`used_fallback: true` means VBB was unreachable and time-shifted stale departures are being served. The display page shows a yellow stale-data badge and yellow “last updated” timer in this case (not green).
 
 ### `transport_type` normalisation
 
