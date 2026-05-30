@@ -12,8 +12,13 @@ from flask import jsonify
 from flask import make_response
 from flask import render_template
 from flask import request
+from spyglass import MetricsCollector
+from spyglass import configure_logging
+from spyglass.server.site import site as spyglass_site
 
 from .config import FLASK_PORT
+from .config import PROJECT_NAME
+from .config import SPYGLASS_HOST
 from .datamodels import Departure
 from .datamodels import Station
 from .departures_fallback import get_fallback_departures
@@ -25,11 +30,9 @@ from .observability import build_summary
 from .observability import fetch_logs
 from .observability import fetch_metrics
 from .observability import fetch_spyglass_status
-from .observability import metrics
 from .observability import parse_rollup
 from .observability import parse_window_amount
 from .observability import parse_window_unit
-from .observability import track_request
 from .observability import window_hours_from
 from .quadrants import filter_and_group
 from .utils import config
@@ -45,8 +48,12 @@ from .vbb_api import vbb_cache_timestamp
 
 logger = logging.getLogger(__name__)
 
+configure_logging(host=SPYGLASS_HOST, project=PROJECT_NAME)
+metrics = MetricsCollector(host=SPYGLASS_HOST, project=PROJECT_NAME)
+
 basedir = Path(__file__).parent.parent
 app = Flask(__name__, template_folder=str(basedir / "templates"), static_folder=str(basedir / "static"))
+app.register_blueprint(spyglass_site, url_prefix="/spyglass")
 logging.getLogger("werkzeug").setLevel(logging.WARNING)
 
 # Global state
@@ -101,7 +108,7 @@ def display():
 def observability():
     """Render the observability dashboard."""
     asset_version = int(datetime.now(timezone.utc).timestamp())
-    return render_template("observability.html", asset_version=asset_version)
+    return render_template("observability.html", asset_version=asset_version, spyglass_url="/spyglass")
 
 
 @app.route("/api/observability/summary")
@@ -153,7 +160,7 @@ def api_location():
 
 
 @app.route("/api/stations")
-@track_request("stations")
+@metrics.timed("stations")
 def api_stations():
     """Return station and train data as JSON."""
     global browser_coordinates, cached_stations
@@ -220,7 +227,7 @@ def _fetch_display_departures(
 
 
 @app.route("/api/display/data")
-@track_request("display_data")
+@metrics.timed("display_data")
 def api_display_data():
     """Return quadrant departure data for the fixed display station as JSON."""
     display_config = config["display"]

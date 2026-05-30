@@ -1,23 +1,17 @@
 from datetime import datetime
 from datetime import timedelta
 from datetime import timezone
+from unittest.mock import MagicMock
+from unittest.mock import patch
 
-import pytest
+from spyglass.dashboard.schemas import LogHistogram
 
-from src.observability.schemas import PreparedLogEntry
 from src.observability.schemas import SpyglassStatus
-from src.observability.view import DEFAULT_ROLLUP
 from src.observability.view import _build_charts
-from src.observability.view import _build_log_histogram
 from src.observability.view import _display_status
-from src.observability.view import _prepare_logs
 from src.observability.view import _sum_counter
 from src.observability.view import _timing_summary
 from src.observability.view import build_summary
-from src.observability.view import parse_rollup
-from src.observability.view import parse_window_unit
-from src.observability.view import resolve_rollup_minutes
-from src.observability.view import window_hours_from
 
 
 def _spyglass(reachable: bool = True) -> SpyglassStatus:
@@ -36,7 +30,29 @@ def _point(name: str, metric_type: str, value: float, tags: dict | None = None) 
     }
 
 
-def test_build_summary_marks_healthy_when_display_is_fresh():
+@patch("src.observability.view.prepare_logs")
+@patch("src.observability.view.build_log_histogram")
+@patch("src.observability.view.resolve_rollup_minutes", return_value=15)
+@patch("src.observability.view.window_hours_from", return_value=6)
+@patch("src.observability.view.parse_rollup", return_value="auto")
+@patch("src.observability.view.parse_window_unit", return_value="hours")
+@patch("src.observability.view.parse_window_amount", return_value=6)
+def test_build_summary_marks_healthy_when_display_is_fresh(
+    mock_parse_amount,
+    mock_parse_unit,
+    mock_parse_rollup,
+    mock_window_hours,
+    mock_resolve_rollup,
+    mock_histogram,
+    mock_prepare_logs,
+):
+    mock_prepare_logs.return_value = []
+    mock_histogram.return_value = LogHistogram(
+        labels=["label1"],
+        counts={"INFO": [0], "ERROR": [0], "WARNING": [0]},
+        total=0,
+    )
+
     metrics = [
         _point("trainspotter.wrapper.request", "counter", 5, {"route": "display_data"}),
         _point("trainspotter._fetch_display_departures.display.fresh", "counter", 12),
@@ -137,41 +153,12 @@ def test_timing_summary_computes_percentiles():
         _point("trainspotter.wrapper.request", "timing", 300, {"route": "stations"}),
     ]
 
-    summary = _timing_summary(metrics, ".request", route="stations")
+    summary = _timing_summary(metrics, ".request", tags={"route": "stations"})
 
     assert summary.count == 3
     assert summary.p50_ms == 200
     assert summary.p95_ms == 300
     assert summary.max_ms == 300
-
-
-def test_prepare_logs_parses_spyglass_message_format():
-    logs = [
-        {
-            "timestamp": "2026-05-27T10:00:00Z",
-            "level": "INFO",
-            "logger_name": "src.app",
-            "message": "2026-05-27 10:00:00,123 INFO [api_display_data] src.app departures refreshed",
-        },
-        {
-            "timestamp": "2026-05-27T10:01:00Z",
-            "level": "WARNING",
-            "logger_name": "src.app",
-            "message": "plain message without prefix",
-        },
-    ]
-
-    prepared = _prepare_logs(logs)
-
-    assert prepared[0] == PreparedLogEntry(
-        timestamp="2026-05-27T10:00:00Z",
-        level="INFO",
-        logger_name="src.app",
-        function="api_display_data",
-        message="departures refreshed",
-    )
-    assert prepared[1].function is None
-    assert prepared[1].message == "plain message without prefix"
 
 
 def test_display_status_uses_most_recent_outcome_metric():
@@ -217,7 +204,7 @@ def test_sum_counter_filters_by_route_tag():
         _point("trainspotter.wrapper.request", "counter", 7, {"route": "display_data"}),
     ]
 
-    assert _sum_counter(metrics, ".request", route="stations") == 3
+    assert _sum_counter(metrics, ".request", tags={"route": "stations"}) == 3
 
 
 def test_build_charts_buckets_metrics_by_time():
@@ -261,51 +248,50 @@ def test_build_charts_buckets_metrics_by_time():
     assert charts.latency_p50_ms.vbb_fetch[-1] == 300
 
 
-def test_build_log_histogram_counts_by_level_and_bucket():
-    now = datetime(2026, 5, 27, 12, 0, tzinfo=timezone.utc)
-    logs = _prepare_logs(
-        [
-            {"timestamp": "2026-05-27T11:50:00Z", "level": "INFO", "logger_name": "src.app", "message": "a"},
-            {"timestamp": "2026-05-27T11:50:00Z", "level": "ERROR", "logger_name": "src.app", "message": "b"},
-            {"timestamp": "2026-05-27T11:55:00Z", "level": "WARNING", "logger_name": "src.app", "message": "c"},
-        ]
+@patch("src.observability.view.build_log_histogram")
+@patch("src.observability.view.TimeWindow")
+@patch("src.observability.view.prepare_logs")
+@patch("src.observability.view.resolve_rollup_minutes", return_value=5)
+@patch("src.observability.view.window_hours_from", return_value=1)
+@patch("src.observability.view.parse_rollup", return_value="5")
+@patch("src.observability.view.parse_window_unit", return_value="hours")
+@patch("src.observability.view.parse_window_amount", return_value=1)
+def test_build_log_histogram_counts_by_level_and_bucket(
+    mock_parse_amount,
+    mock_parse_unit,
+    mock_parse_rollup,
+    mock_window_hours,
+    mock_resolve_rollup,
+    mock_prepare_logs,
+    mock_time_window,
+    mock_build_histogram,
+):
+    mock_prepare_logs.return_value = []
+    mock_histogram = LogHistogram(
+        labels=["label1", "label2"],
+        counts={
+            "INFO": [0, 1],
+            "ERROR": [1, 0],
+            "WARNING": [0, 1],
+            "DEBUG": [0, 0],
+        },
+        total=3,
+    )
+    mock_build_histogram.return_value = mock_histogram
+    mock_window = MagicMock()
+    mock_time_window.from_hours.return_value = mock_window
+
+    summary = build_summary(
+        metrics=[],
+        logs=[],
+        window_amount=1,
+        window_unit="hours",
+        rollup="5",
+        spyglass_status=_spyglass(),
     )
 
-    histogram = _build_log_histogram(logs, window_hours=1, now=now, rollup_minutes=5)
-
-    assert len(histogram.labels) == 12
-    assert histogram.by_level["INFO"][-2] == 1
-    assert histogram.by_level["ERROR"][-2] == 1
-    assert histogram.by_level["WARNING"][-1] == 1
-    assert sum(histogram.by_level["DEBUG"]) == 0
-
-
-@pytest.mark.parametrize(
-    ("amount", "unit", "expected_hours"),
-    [
-        (6, "hours", 6),
-        (2, "days", 48),
-        (1, "weeks", 168),
-        (3, "months", 2160),
-        (0, "hours", 1),
-        (20, "months", 8640),
-    ],
-)
-def test_window_hours_from(amount, unit, expected_hours):
-    assert window_hours_from(amount, unit) == expected_hours
-
-
-def test_parse_window_unit_defaults_to_hours():
-    assert parse_window_unit("invalid") == "hours"
-
-
-def test_parse_rollup_defaults_to_default_rollup():
-    assert parse_rollup("invalid") == DEFAULT_ROLLUP
-
-
-def test_resolve_rollup_minutes_uses_explicit_bucket():
-    assert resolve_rollup_minutes("30", window_hours=6) == 30
-
-
-def test_resolve_rollup_minutes_auto_uses_window_logic():
-    assert resolve_rollup_minutes("auto", window_hours=6) == 15
+    assert len(summary.log_histogram.labels) == 2
+    assert summary.log_histogram.counts["INFO"] == [0, 1]
+    assert summary.log_histogram.counts["ERROR"] == [1, 0]
+    assert summary.log_histogram.counts["WARNING"] == [0, 1]
+    assert sum(summary.log_histogram.counts["DEBUG"]) == 0

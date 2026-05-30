@@ -8,13 +8,17 @@ from pathlib import Path
 
 import requests
 from requests.adapters import HTTPAdapter
+from spyglass import MetricsCollector
 from urllib3.util.retry import Retry
 
+from .config import PROJECT_NAME
+from .config import SPYGLASS_HOST
 from .datamodels import Departure
 from .datamodels import Station
 from .datamodels import parse_departures
 from .datamodels import parse_stations
-from .observability import metrics
+
+metrics = MetricsCollector(host=SPYGLASS_HOST, project=PROJECT_NAME)
 
 logger = logging.getLogger(__name__)
 logging.getLogger("urllib3.connectionpool").setLevel(logging.ERROR)
@@ -37,12 +41,13 @@ def _load_station_snapshot(path: Path) -> list[dict]:
         raise FileNotFoundError(
             f"Station data not found at {path}. Run `python scripts/fetch_stations.py` to generate it."
         )
-    return json.loads(path.read_text(encoding="utf-8"))
+    data = json.loads(path.read_text(encoding="utf-8"))
+    logger.debug("Loaded %d stations from %s", len(data), path.name)
+    return data
 
 
 _STATIONS_PATH = Path(__file__).resolve().parent.parent / "data" / "vbb_stations.json"
 _ALL_STATIONS: list[dict] = _load_station_snapshot(_STATIONS_PATH)
-logger.info("Loaded %d stations from %s", len(_ALL_STATIONS), _STATIONS_PATH.name)
 
 # Configure requests session with retries and timeouts
 session = requests.Session()

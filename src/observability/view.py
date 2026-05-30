@@ -1,15 +1,37 @@
-"""Fetch Spyglass data and build observability dashboard summaries."""
+"""Fetch Spyglass data and build the Trainspotter observability dashboard summary.
 
-import re
-from dataclasses import dataclass
+Generic math (bucketing, percentiles, series) lives in spyglass.dashboard.aggregate.
+HTTP fetching lives in SpyglassQueryClient.
+This file contains only Trainspotter-specific assembly: metric suffix disambiguation,
+display-state classification, and section builders that compose aggregate results into
+the typed ObservabilitySummary schema.
+"""
+
 from datetime import datetime
 from datetime import timedelta
 from datetime import timezone
 
-import requests
+from spyglass.client.query import SpyglassQueryClient
+from spyglass.dashboard.aggregate import TimeWindow
+from spyglass.dashboard.aggregate import build_log_histogram
+from spyglass.dashboard.aggregate import compute_state_uptime
+from spyglass.dashboard.aggregate import counter_series
+from spyglass.dashboard.aggregate import latest_gauge
+from spyglass.dashboard.aggregate import parse_metric_time
+from spyglass.dashboard.aggregate import parse_rollup
+from spyglass.dashboard.aggregate import parse_window_amount
+from spyglass.dashboard.aggregate import parse_window_unit
+from spyglass.dashboard.aggregate import prepare_logs
+from spyglass.dashboard.aggregate import ratio_series
+from spyglass.dashboard.aggregate import resolve_rollup_minutes
+from spyglass.dashboard.aggregate import timing_p50_series
+from spyglass.dashboard.aggregate import window_hours_from
 
 from ..config import PROJECT_NAME
 from ..config import SPYGLASS_HOST
+from .config import DISPLAY_STATES
+from .config import DISPLAY_STATUS_LOOKBACK_MINUTES
+from .config import METRIC_SUFFIXES
 from .schemas import CacheStats
 from .schemas import ChartsSummary
 from .schemas import DisplayStatus
@@ -17,24 +39,15 @@ from .schemas import DisplayStatusValue
 from .schemas import DisplayTotals
 from .schemas import DisplayUptime
 from .schemas import LatencySeries
-from .schemas import LogHistogram
 from .schemas import ObservabilitySummary
-from .schemas import PreparedLogEntry
 from .schemas import RouteSeries
 from .schemas import SpyglassStatus
 from .schemas import TimingSummary
 from .schemas import VbbSummary
 from .schemas import WindowInfo
 
-REQUEST_TIMEOUT = 3.0
-DEFAULT_METRICS_LIMIT = 5000
-DEFAULT_LOGS_LIMIT = 2000
-DEFAULT_WINDOW_AMOUNT = 6
-DEFAULT_ROLLUP = "10"
-TARGET_CHART_BUCKETS = 24
-MAX_WINDOW_HOURS = 8640
-LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
-DISPLAY_STATUS_LOOKBACK_MINUTES = 5
+_client = SpyglassQueryClient(host=SPYGLASS_HOST, project=PROJECT_NAME)
+
 DISPLAY_STATUS_LABELS: dict[DisplayStatusValue, str] = {
     "fresh": "Fresh — display is serving live VBB data",
     "stale": "Stale — display is serving a cached snapshot",
@@ -42,213 +55,84 @@ DISPLAY_STATUS_LABELS: dict[DisplayStatusValue, str] = {
     "unknown": "Unknown — Spyglass unreachable",
 }
 
-WINDOW_UNIT_HOURS = {
-    "hours": 1,
-    "days": 24,
-    "weeks": 168,
-    "months": 720,
-}
-VALID_WINDOW_UNITS = frozenset(WINDOW_UNIT_HOURS)
-VALID_ROLLUP_VALUES = frozenset({"auto", "1", "2", "5", "10", "15", "30", "60", "120", "360", "720", "1440"})
 
-# Longest suffixes first so `.display.fresh` wins over shorter accidental matches.
-METRIC_SUFFIXES = (
-    ".display.snapshot_age_seconds",
-    ".display.no_snapshot",
-    ".display.fallback",
-    ".display.fresh",
-    ".response.502",
-    ".vbb.cache_hit",
-    ".vbb.cache_miss",
-    ".vbb.fetch",
-    ".vbb.error",
-    ".request",
-)
-
-SPYGLASS_LOG_PREFIX = re.compile(
-    r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(?:,\d+)? " r"\w+ " r"\[([^\]]+)\] " r"\S+ " r"(.*)$",
-    re.DOTALL,
-)
+def _ensure_utc(dt: datetime) -> datetime:
+    """Ensure datetime is timezone-aware (UTC). Assume naive datetimes are UTC."""
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt
 
 
-def _normalize_host(host: str) -> str:
-    if host.startswith(("http://", "https://")):
-        return host
-    return f"http://{host}"
-
-
-SPYGLASS_BASE = _normalize_host(SPYGLASS_HOST)
-
-
-@dataclass(frozen=True)
-class _TimeWindow:
-    """Fixed-size time buckets for chart and histogram aggregation."""
-
-    start: datetime
-    bucket_minutes: int
-    bucket_count: int
-
-    @classmethod
-    def from_hours(cls, window_hours: int, now: datetime, rollup_minutes: int) -> "_TimeWindow":
-        bucket_count = max(1, int(window_hours * 60 / rollup_minutes))
-        return cls(
-            start=now - timedelta(hours=window_hours),
-            bucket_minutes=rollup_minutes,
-            bucket_count=bucket_count,
-        )
-
-    def labels(self, window_hours: int) -> list[str]:
-        return _bucket_labels(self.start, self.bucket_minutes, self.bucket_count, window_hours)
-
-
-def parse_window_amount(amount: int | None) -> int:
-    """Clamp window amount to at least 1."""
-    return max(1, amount if amount is not None else DEFAULT_WINDOW_AMOUNT)
-
-
-def parse_window_unit(unit: str | None) -> str:
-    """Return a supported window unit, defaulting to hours."""
-    if unit in VALID_WINDOW_UNITS:
-        return unit
-    return "hours"
-
-
-def window_hours_from(amount: int, unit: str) -> int:
-    """Convert amount + unit to hours, capped at 12 months."""
-    return min(parse_window_amount(amount) * WINDOW_UNIT_HOURS[unit], MAX_WINDOW_HOURS)
-
-
-def parse_rollup(rollup: str | None) -> str:
-    """Return a supported rollup value, defaulting to DEFAULT_ROLLUP."""
-    if rollup in VALID_ROLLUP_VALUES:
-        return rollup
-    return DEFAULT_ROLLUP
-
-
-def resolve_rollup_minutes(rollup: str, window_hours: int) -> int:
-    """Resolve rollup query param to bucket width in minutes."""
-    if rollup == "auto":
-        return _bucket_minutes_for_window(window_hours)
-    return int(rollup)
+# HTTP helpers (thin wrappers over SpyglassQueryClient)
 
 
 def fetch_spyglass_status() -> SpyglassStatus:
-    """Return Spyglass server reachability."""
-    try:
-        response = requests.get(f"{SPYGLASS_BASE}/status", timeout=REQUEST_TIMEOUT)
-        response.raise_for_status()
-        return SpyglassStatus(reachable=True, status=response.json())
-    except requests.RequestException as error:
-        return SpyglassStatus(reachable=False, error=str(error))
+    result = _client.status()
+    if result is None:
+        return SpyglassStatus(reachable=False, error="unreachable")
+    return SpyglassStatus(reachable=True, status=result)
 
 
-def _fetch_spyglass(resource: str, since: datetime, limit: int) -> list[dict]:
-    response = requests.get(
-        f"{SPYGLASS_BASE}/{resource}",
-        params={
-            "project": PROJECT_NAME,
-            "from": since.astimezone(timezone.utc).isoformat(),
-            "limit": limit,
-        },
-        timeout=REQUEST_TIMEOUT,
-    )
-    response.raise_for_status()
-    return response.json()
+def fetch_metrics(since: datetime) -> list[dict]:
+    return _client.fetch_metrics(since)
 
 
-def fetch_metrics(since: datetime, limit: int = DEFAULT_METRICS_LIMIT) -> list[dict]:
-    """Query raw metric points from Spyglass."""
-    return _fetch_spyglass("metrics", since, limit)
+def fetch_logs(since: datetime) -> list[dict]:
+    return _client.fetch_logs(since)
 
 
-def fetch_logs(since: datetime, limit: int = DEFAULT_LOGS_LIMIT) -> list[dict]:
-    """Query recent log entries from Spyglass."""
-    return _fetch_spyglass("logs", since, limit)
-
-
-def _prepare_logs(logs: list[dict]) -> list[PreparedLogEntry]:
-    """Parse Spyglass log entries into structured rows for the dashboard."""
-    prepared: list[PreparedLogEntry] = []
-    for entry in logs:
-        raw_message = entry.get("message") or ""
-        match = SPYGLASS_LOG_PREFIX.match(raw_message)
-        if match:
-            function = match.group(1)
-            message = match.group(2)
-        else:
-            function = None
-            message = raw_message
-        prepared.append(
-            PreparedLogEntry(
-                timestamp=entry.get("timestamp"),
-                level=entry.get("level"),
-                logger_name=entry.get("logger_name"),
-                function=function,
-                message=message,
-            )
-        )
-    return prepared
+# Trainspotter metric classification
 
 
 def _metric_suffix(name: str) -> str | None:
-    """Return the known metric suffix for a Spyglass metric name, if any."""
-    return next((suffix for suffix in METRIC_SUFFIXES if name.endswith(suffix)), None)
-
-
-def _percentile(values: list[float], pct: float) -> float | None:
-    if not values:
-        return None
-    sorted_values = sorted(values)
-    index = min(int(len(sorted_values) * pct / 100), len(sorted_values) - 1)
-    return sorted_values[index]
+    """Return the known Trainspotter suffix for a metric name, longest match first."""
+    return next((s for s in METRIC_SUFFIXES if name.endswith(s)), None)
 
 
 def _points(
     metrics: list[dict],
     suffix: str,
     metric_type: str | None = None,
-    route: str | None = None,
+    tags: dict | None = None,
 ) -> list[dict]:
-    matched: list[dict] = []
+    """Filter metrics using Trainspotter suffix disambiguation + optional tags."""
+    matched = []
     for point in metrics:
         if _metric_suffix(point["name"]) != suffix:
             continue
         if metric_type is not None and point["metric_type"] != metric_type:
             continue
-        if route is not None:
-            tags = point.get("tags") or {}
-            if tags.get("route") != route:
+        if tags:
+            point_tags = point.get("tags") or {}
+            if not all(point_tags.get(k) == v for k, v in tags.items()):
                 continue
         matched.append(point)
     return matched
 
 
-def _sum_counter(metrics: list[dict], suffix: str, route: str | None = None) -> float:
-    return sum(point["value"] for point in _points(metrics, suffix, "counter", route))
+def _sum_counter(metrics: list[dict], suffix: str, tags: dict | None = None) -> float:
+    return sum(p["value"] for p in _points(metrics, suffix, "counter", tags))
 
 
-def _timing_summary(metrics: list[dict], suffix: str, route: str | None = None) -> TimingSummary:
-    values = [point["value"] for point in _points(metrics, suffix, "timing", route)]
+def _timing_summary(metrics: list[dict], suffix: str, tags: dict | None = None) -> TimingSummary:
+    values = [p["value"] for p in _points(metrics, suffix, "timing", tags)]
     if not values:
         return TimingSummary(count=0, p50_ms=None, p95_ms=None, max_ms=None)
+    sorted_v = sorted(values)
+    p50_idx = min(int(len(sorted_v) * 50 / 100), len(sorted_v) - 1)
+    p95_idx = min(int(len(sorted_v) * 95 / 100), len(sorted_v) - 1)
     return TimingSummary(
         count=len(values),
-        p50_ms=_percentile(values, 50),
-        p95_ms=_percentile(values, 95),
+        p50_ms=sorted_v[p50_idx],
+        p95_ms=sorted_v[p95_idx],
         max_ms=max(values),
     )
 
 
-def _latest_gauge(metrics: list[dict], suffix: str) -> float | None:
-    points = _points(metrics, suffix, "gauge")
-    if not points:
-        return None
-    latest = max(points, key=lambda point: _parse_metric_time(point["timestamp"]))
-    return latest["value"]
+# Display status (current state badge — 5-minute lookback)
 
 
 def _outcome_status_for_point(point: dict) -> DisplayStatusValue | None:
-    """Map a display-outcome counter to fresh, stale, or degraded."""
     suffix = _metric_suffix(point["name"])
     tags = point.get("tags") or {}
     if suffix == ".display.no_snapshot":
@@ -263,7 +147,6 @@ def _outcome_status_for_point(point: dict) -> DisplayStatusValue | None:
 
 
 def _display_status(metrics: list[dict], now: datetime, spyglass_reachable: bool) -> DisplayStatus:
-    """Infer current display serving mode from the most recent display outcome metric."""
     if not spyglass_reachable:
         return DisplayStatus(status="unknown", label=DISPLAY_STATUS_LABELS["unknown"])
 
@@ -276,11 +159,11 @@ def _display_status(metrics: list[dict], now: datetime, spyglass_reachable: bool
         status = _outcome_status_for_point(point)
         if status is None:
             continue
-        parsed_time = _parse_metric_time(point["timestamp"])
-        if parsed_time < cutoff:
+        ts = _ensure_utc(parse_metric_time(point["timestamp"]))
+        if ts < cutoff:
             continue
-        if latest is None or parsed_time > latest[0]:
-            latest = (parsed_time, status, point["timestamp"])
+        if latest is None or ts > latest[0]:
+            latest = (ts, status, point["timestamp"])
 
     if latest is None:
         return DisplayStatus(status="fresh", label=DISPLAY_STATUS_LABELS["fresh"])
@@ -289,77 +172,46 @@ def _display_status(metrics: list[dict], now: datetime, spyglass_reachable: bool
     return DisplayStatus(status=status, label=DISPLAY_STATUS_LABELS[status], based_on=based_on)
 
 
-def _build_display_totals(metrics: list[dict], window_hours: int, now: datetime) -> DisplayTotals:
-    return DisplayTotals(
-        fresh=_sum_counter(metrics, ".display.fresh"),
-        fallback=_sum_counter(metrics, ".display.fallback"),
-        no_snapshot=_sum_counter(metrics, ".display.no_snapshot"),
-        failed_responses=_sum_counter(metrics, ".response.502", route="display_data"),
-        snapshot_age_seconds=_latest_gauge(metrics, ".display.snapshot_age_seconds"),
-        uptime=_build_display_uptime(metrics, now=now, window_hours=window_hours),
-    )
+# Section builders (Trainspotter-specific composition)
 
 
-def _build_display_uptime(
-    metrics: list[dict], now: datetime | None = None, window_hours: int = DEFAULT_WINDOW_AMOUNT
-) -> DisplayUptime:
-    """Calculate time-weighted display uptime percentages from outcome transitions."""
-    window_end = now or datetime.now(timezone.utc)
+def _build_display_uptime(metrics: list[dict], now: datetime, window_hours: int) -> DisplayUptime:
+    window_end = now
     window_start = window_end - timedelta(hours=window_hours)
 
-    events: list[tuple[datetime, DisplayStatusValue]] = []
+    events: list[tuple[datetime, str]] = []
     for point in metrics:
         if point.get("metric_type") != "counter" or point["value"] <= 0:
             continue
         status = _outcome_status_for_point(point)
         if status is None:
             continue
-        timestamp = _parse_metric_time(point["timestamp"])
-        if timestamp < window_start or timestamp > window_end:
-            continue
-        events.append((timestamp, status))
+        ts = _ensure_utc(parse_metric_time(point["timestamp"]))
+        if window_start <= ts <= window_end:
+            events.append((ts, status))
 
-    events.sort(key=lambda item: item[0])
-
-    durations = {"fresh": 0.0, "stale": 0.0, "degraded": 0.0, "unknown": 0.0}
-    current_status: DisplayStatusValue = "unknown"
-    cursor = window_start
-
-    for event_time, event_status in events:
-        elapsed_seconds = (event_time - cursor).total_seconds()
-        if elapsed_seconds > 0:
-            durations[current_status] += elapsed_seconds
-        current_status = event_status
-        cursor = event_time
-
-    tail_seconds = (window_end - cursor).total_seconds()
-    if tail_seconds > 0:
-        durations[current_status] += tail_seconds
-
-    total_seconds = max(0.0, (window_end - window_start).total_seconds())
-    if total_seconds == 0:
-        return DisplayUptime(
-            fresh_seconds=0.0,
-            stale_seconds=0.0,
-            degraded_seconds=0.0,
-            unknown_seconds=0.0,
-            fresh_pct=0.0,
-            stale_pct=0.0,
-            degraded_pct=0.0,
-            unknown_pct=0.0,
-            outcome_events=0,
-        )
-
+    result = compute_state_uptime(events, window_start, window_end, DISPLAY_STATES)
     return DisplayUptime(
-        fresh_seconds=durations["fresh"],
-        stale_seconds=durations["stale"],
-        degraded_seconds=durations["degraded"],
-        unknown_seconds=durations["unknown"],
-        fresh_pct=durations["fresh"] / total_seconds * 100,
-        stale_pct=durations["stale"] / total_seconds * 100,
-        degraded_pct=durations["degraded"] / total_seconds * 100,
-        unknown_pct=durations["unknown"] / total_seconds * 100,
-        outcome_events=len(events),
+        fresh_seconds=result.seconds.get("fresh", 0.0),
+        stale_seconds=result.seconds.get("stale", 0.0),
+        degraded_seconds=result.seconds.get("degraded", 0.0),
+        unknown_seconds=result.seconds.get("unknown", 0.0),
+        fresh_pct=result.pcts.get("fresh", 0.0),
+        stale_pct=result.pcts.get("stale", 0.0),
+        degraded_pct=result.pcts.get("degraded", 0.0),
+        unknown_pct=result.pcts.get("unknown", 0.0),
+        outcome_events=result.event_count,
+    )
+
+
+def _build_display_totals(metrics: list[dict], window_hours: int, now: datetime) -> DisplayTotals:
+    return DisplayTotals(
+        fresh=_sum_counter(metrics, ".display.fresh"),
+        fallback=_sum_counter(metrics, ".display.fallback"),
+        no_snapshot=_sum_counter(metrics, ".display.no_snapshot"),
+        failed_responses=_sum_counter(metrics, ".response.502", tags={"route": "display_data"}),
+        snapshot_age_seconds=latest_gauge(metrics, ".display.snapshot_age_seconds"),
+        uptime=_build_display_uptime(metrics, now=now, window_hours=window_hours),
     )
 
 
@@ -378,114 +230,29 @@ def _build_vbb_summary(metrics: list[dict]) -> VbbSummary:
     )
 
 
-def _bucket_minutes_for_window(window_hours: int) -> int:
-    """Pick a bucket width that yields roughly TARGET_CHART_BUCKETS bars."""
-    raw = max(1, int(window_hours * 60 / TARGET_CHART_BUCKETS))
-    for candidate in (1, 5, 15, 30, 60, 120, 360, 720, 1440):
-        if raw <= candidate:
-            return candidate
-    return 1440
-
-
-def _parse_metric_time(timestamp: str) -> datetime:
-    return datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
-
-
-def _bucket_index(timestamp: datetime, window: _TimeWindow) -> int | None:
-    elapsed_minutes = (timestamp - window.start).total_seconds() / 60
-    if elapsed_minutes < 0:
-        return None
-    index = int(elapsed_minutes // window.bucket_minutes)
-    if index >= window.bucket_count:
-        return None
-    return index
-
-
-def _bucket_labels(window_start: datetime, bucket_minutes: int, bucket_count: int, window_hours: int) -> list[str]:
-    labels: list[str] = []
-    for index in range(bucket_count):
-        start = window_start + timedelta(minutes=index * bucket_minutes)
-        if window_hours <= 24:
-            labels.append(start.strftime("%H:%M"))
-        else:
-            labels.append(start.strftime("%m-%d %H:%M"))
-    return labels
-
-
-def _timing_p50_by_bucket(
-    metrics: list[dict],
-    suffix: str,
-    window: _TimeWindow,
-    route: str | None = None,
-) -> list[float | None]:
-    buckets: list[list[float]] = [[] for _ in range(window.bucket_count)]
-    for point in _points(metrics, suffix, "timing", route):
-        index = _bucket_index(_parse_metric_time(point["timestamp"]), window)
-        if index is not None:
-            buckets[index].append(point["value"])
-    return [_percentile(values, 50) if values else None for values in buckets]
-
-
-def _counter_series_by_bucket(
-    metrics: list[dict],
-    suffix: str,
-    window: _TimeWindow,
-    route: str | None = None,
-) -> list[float]:
-    series = [0.0] * window.bucket_count
-    for point in _points(metrics, suffix, "counter", route):
-        index = _bucket_index(_parse_metric_time(point["timestamp"]), window)
-        if index is not None:
-            series[index] += point["value"]
-    return series
-
-
-def _cache_hit_rate_by_bucket(metrics: list[dict], window: _TimeWindow) -> list[float | None]:
-    hits = _counter_series_by_bucket(metrics, ".vbb.cache_hit", window)
-    misses = _counter_series_by_bucket(metrics, ".vbb.cache_miss", window)
-    rates: list[float | None] = []
-    for hit_count, miss_count in zip(hits, misses, strict=True):
-        total = hit_count + miss_count
-        rates.append((hit_count / total * 100) if total else None)
-    return rates
-
-
 def _build_charts(metrics: list[dict], window_hours: int, now: datetime, rollup_minutes: int) -> ChartsSummary:
-    """Build time-series data for dashboard charts."""
-    window = _TimeWindow.from_hours(window_hours, now, rollup_minutes)
-
+    window = TimeWindow.from_hours(window_hours, now, rollup_minutes)
+    hits = counter_series(metrics, ".vbb.cache_hit", window)
+    misses = counter_series(metrics, ".vbb.cache_miss", window)
+    totals = [h + m for h, m in zip(hits, misses)]
     return ChartsSummary(
         bucket_minutes=window.bucket_minutes,
-        labels=window.labels(window_hours),
+        labels=window.labels(),
         requests_by_route=RouteSeries(
-            stations=_counter_series_by_bucket(metrics, ".request", window, route="stations"),
-            display_data=_counter_series_by_bucket(metrics, ".request", window, route="display_data"),
+            stations=counter_series(metrics, ".request", window, tags={"route": "stations"}),
+            display_data=counter_series(metrics, ".request", window, tags={"route": "display_data"}),
         ),
         latency_p50_ms=LatencySeries(
-            stations=_timing_p50_by_bucket(metrics, ".request", window, route="stations"),
-            display_data=_timing_p50_by_bucket(metrics, ".request", window, route="display_data"),
-            vbb_fetch=_timing_p50_by_bucket(metrics, ".vbb.fetch", window),
+            stations=timing_p50_series(metrics, ".request", window, tags={"route": "stations"}),
+            display_data=timing_p50_series(metrics, ".request", window, tags={"route": "display_data"}),
+            vbb_fetch=timing_p50_series(metrics, ".vbb.fetch", window),
         ),
-        vbb_errors=_counter_series_by_bucket(metrics, ".vbb.error", window),
-        cache_hit_rate_pct=_cache_hit_rate_by_bucket(metrics, window),
+        vbb_errors=counter_series(metrics, ".vbb.error", window),
+        cache_hit_rate_pct=ratio_series(hits, totals),
     )
 
 
-def _build_log_histogram(
-    logs: list[PreparedLogEntry], window_hours: int, now: datetime, rollup_minutes: int
-) -> LogHistogram:
-    """Count log entries per level in each time bucket."""
-    window = _TimeWindow.from_hours(window_hours, now, rollup_minutes)
-    counts = {level: [0] * window.bucket_count for level in LOG_LEVELS}
-
-    for entry in logs:
-        if not entry.timestamp or entry.level not in counts:
-            continue
-        index = _bucket_index(_parse_metric_time(entry.timestamp), window)
-        if index is not None:
-            counts[entry.level][index] += 1
-
-    return LogHistogram(labels=window.labels(window_hours), by_level=counts)
+# Public entry point
 
 
 def build_summary(
@@ -496,28 +263,26 @@ def build_summary(
     rollup: str,
     spyglass_status: SpyglassStatus,
 ) -> ObservabilitySummary:
-    """Aggregate Spyglass points into dashboard sections."""
+    """Aggregate Spyglass points into typed dashboard sections."""
     now = datetime.now(timezone.utc)
     amount = parse_window_amount(window_amount)
     unit = parse_window_unit(window_unit)
     rollup_value = parse_rollup(rollup)
     window_hours = window_hours_from(amount, unit)
     rollup_minutes = resolve_rollup_minutes(rollup_value, window_hours)
-    prepared_logs = _prepare_logs(logs)
+    prepared_logs = prepare_logs(logs)
 
     return ObservabilitySummary(
         generated_at=now.isoformat(),
-        window=WindowInfo(
-            amount=amount,
-            unit=unit,
-            hours=window_hours,
-            rollup_minutes=rollup_minutes,
-        ),
+        window=WindowInfo(amount=amount, unit=unit, hours=window_hours, rollup_minutes=rollup_minutes),
         display_status=_display_status(metrics, now, spyglass_status.reachable),
         spyglass=spyglass_status,
         charts=_build_charts(metrics, window_hours, now, rollup_minutes),
         display=_build_display_totals(metrics, window_hours, now),
         vbb=_build_vbb_summary(metrics),
-        log_histogram=_build_log_histogram(prepared_logs, window_hours, now, rollup_minutes),
+        log_histogram=build_log_histogram(
+            prepared_logs,
+            TimeWindow.from_hours(window_hours, now, rollup_minutes),
+        ),
         logs=prepared_logs,
     )

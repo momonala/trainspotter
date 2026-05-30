@@ -30,6 +30,8 @@ const STATUS_LABELS = {
 const chartInstances = {};
 let allLogs = [];
 let logHistogramMeta = null;
+let activePatternTemplate = null;
+let currentView = "logs"; // "logs" | "patterns"
 
 function formatSecondsFromMs(value) {
     if (value == null) return "—";
@@ -379,21 +381,17 @@ function filterLogs(logs) {
     const contentQuery = document.getElementById("logContentFilter").value.trim().toLowerCase();
 
     return logs.filter((log) => {
-        if (!levels.includes(log.level)) {
-            return false;
-        }
+        if (!levels.includes(log.level)) return false;
 
         if (functionQuery) {
-            const functionName = (log.function ?? "").toLowerCase();
-            const loggerName = (log.logger_name ?? "").toLowerCase();
-            if (!functionName.includes(functionQuery) && !loggerName.includes(functionQuery)) {
-                return false;
-            }
+            const fn = (log.function ?? "").toLowerCase();
+            const logger = (log.logger_name ?? "").toLowerCase();
+            if (!fn.includes(functionQuery) && !logger.includes(functionQuery)) return false;
         }
 
-        if (contentQuery && !(log.message ?? "").toLowerCase().includes(contentQuery)) {
-            return false;
-        }
+        if (contentQuery && !(log.message ?? "").toLowerCase().includes(contentQuery)) return false;
+
+        if (activePatternTemplate && tokenizeMessage(log.message ?? "") !== activePatternTemplate) return false;
 
         return true;
     });
@@ -403,17 +401,135 @@ function levelBadgeClass(level) {
     return `level-badge level-${(level ?? "unknown").toLowerCase()}`;
 }
 
+// ── Python traceback formatter ────────────────────────────────────
+
+const TRACEBACK_PATTERNS = {
+    header:    /^Traceback \(most recent call last\):/,
+    location:  /^\s+File "[^"]+", line \d+/,
+    source:    /^    \S/,
+    exception: /^\w[\w.]*(?:Error|Exception|Warning|KeyboardInterrupt|SystemExit|StopIteration)(\s*:|$)/,
+};
+
+function classifyTracebackLine(line) {
+    if (TRACEBACK_PATTERNS.header.test(line))    return "tb-header";
+    if (TRACEBACK_PATTERNS.location.test(line))  return "tb-location";
+    if (TRACEBACK_PATTERNS.source.test(line))    return "tb-source";
+    if (TRACEBACK_PATTERNS.exception.test(line)) return "tb-exception";
+    return null;
+}
+
+function findExceptionLine(lines) {
+    for (let i = lines.length - 1; i >= 0; i--) {
+        if (lines[i].trim() && TRACEBACK_PATTERNS.exception.test(lines[i])) return lines[i].trim();
+    }
+    for (let i = lines.length - 1; i >= 0; i--) {
+        if (lines[i].trim()) return lines[i].trim();
+    }
+    return "";
+}
+
+function buildTracebackPre(lines) {
+    const pre = document.createElement("pre");
+    pre.className = "log-traceback";
+    const contentLines = lines[lines.length - 1] === "" ? lines.slice(0, -1) : lines;
+    for (let i = 0; i < contentLines.length; i++) {
+        const line = contentLines[i];
+        const cls = classifyTracebackLine(line);
+        if (cls) {
+            const span = document.createElement("span");
+            span.className = cls;
+            span.textContent = line;
+            pre.appendChild(span);
+        } else {
+            pre.appendChild(document.createTextNode(line));
+        }
+        if (i < contentLines.length - 1) pre.appendChild(document.createTextNode("\n"));
+    }
+    return pre;
+}
+
+function buildCollapsibleTraceback(lines) {
+    const exceptionLine = findExceptionLine(lines);
+
+    const wrapper = document.createElement("div");
+    wrapper.className = "tb-wrapper tb-collapsed";
+
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "tb-toggle";
+    toggle.addEventListener("click", () => wrapper.classList.toggle("tb-collapsed"));
+
+    const chevron = document.createElement("span");
+    chevron.className = "tb-chevron";
+    chevron.setAttribute("aria-hidden", "true");
+    chevron.textContent = "›";
+
+    const summary = document.createElement("span");
+    summary.className = "tb-exception";
+    summary.textContent = exceptionLine;
+
+    toggle.append(chevron, summary);
+    wrapper.append(toggle, buildTracebackPre(lines));
+    return wrapper;
+}
+
+function renderMessage(message) {
+    if (!message) return document.createTextNode("—");
+    const lines = message.split("\n");
+    if (lines.length === 1) return document.createTextNode(message);
+
+    const isTraceback = lines.some(
+        (l) => TRACEBACK_PATTERNS.header.test(l) || TRACEBACK_PATTERNS.location.test(l)
+    );
+    if (isTraceback) return buildCollapsibleTraceback(lines);
+
+    const pre = document.createElement("pre");
+    pre.className = "log-pre";
+    pre.textContent = message;
+    return pre;
+}
+
+// ── Log pattern grouping ──────────────────────────────────────────
+
+function tokenizeMessage(message) {
+    return message
+        .replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi, "*")
+        .replace(/\b(?:\d{1,3}\.){3}\d{1,3}(?::\d+)?\b/g, "*")
+        .replace(/\b0x[0-9a-f]+\b/gi, "*")
+        .replace(/\b[0-9a-f]{32,}\b/gi, "*")
+        .replace(/"[^"\n]{0,200}"/g, '"*"')
+        .replace(/'[^'\n]{0,200}'/g, "'*'")
+        .replace(/\b\d+\.?\d*\b/g, "*")
+        .replace(/\s+/g, " ")
+        .trim();
+}
+
+function groupByPattern(logs) {
+    const groups = new Map();
+    for (const log of logs) {
+        const template = tokenizeMessage(log.message ?? "");
+        if (!groups.has(template)) groups.set(template, { template, count: 0 });
+        groups.get(template).count++;
+    }
+    return [...groups.values()].sort((a, b) => b.count - a.count);
+}
+
 function refreshLogViews() {
     const filtered = filterLogs(allLogs);
     renderLogHistogram(filtered);
-    renderLogs(filtered);
+    if (currentView === "patterns") {
+        renderPatterns(groupByPattern(filtered));
+    } else {
+        renderLogs(filtered);
+    }
 }
 
 function renderLogs(filtered = filterLogs(allLogs)) {
     const tbody = document.getElementById("logsTableBody");
     const count = document.getElementById("logsCount");
 
-    count.textContent = `Showing ${filtered.length} of ${allLogs.length} logs`;
+    const patternSuffix = activePatternTemplate ? " · pattern filter active" : "";
+    count.textContent = `Showing ${filtered.length} of ${allLogs.length} logs${patternSuffix}`;
     tbody.replaceChildren();
 
     if (!filtered.length) {
@@ -450,11 +566,61 @@ function renderLogs(filtered = filterLogs(allLogs)) {
 
         const messageCell = document.createElement("td");
         messageCell.className = "logs-message";
-        messageCell.textContent = log.message ?? "";
+        messageCell.appendChild(renderMessage(log.message ?? ""));
 
         row.append(timeCell, levelCell, functionCell, loggerCell, messageCell);
         tbody.appendChild(row);
     }
+}
+
+function renderPatterns(patternGroups) {
+    const tbody = document.getElementById("patternsTableBody");
+    tbody.replaceChildren();
+
+    if (!patternGroups.length) {
+        const row = document.createElement("tr");
+        const cell = document.createElement("td");
+        cell.colSpan = 2;
+        cell.className = "logs-empty";
+        cell.textContent = "No patterns found.";
+        row.appendChild(cell);
+        tbody.appendChild(row);
+        return;
+    }
+
+    for (const { template, count } of patternGroups) {
+        const row = document.createElement("tr");
+        row.className = "pattern-row";
+
+        const countCell = document.createElement("td");
+        const badge = document.createElement("span");
+        badge.className = "pattern-count-badge";
+        badge.textContent = count;
+        countCell.appendChild(badge);
+
+        const tmplCell = document.createElement("td");
+        tmplCell.className = "pattern-template";
+        tmplCell.textContent = template;
+
+        row.append(countCell, tmplCell);
+        row.addEventListener("click", () => {
+            activePatternTemplate = template;
+            switchView("logs");
+        });
+        tbody.appendChild(row);
+    }
+}
+
+function switchView(view) {
+    if (view === "patterns") activePatternTemplate = null;
+    currentView = view;
+
+    document.getElementById("logsSection").hidden = view !== "logs";
+    document.getElementById("patternsSection").hidden = view !== "patterns";
+    document.getElementById("logsViewBtn").classList.toggle("is-active", view === "logs");
+    document.getElementById("patternsViewBtn").classList.toggle("is-active", view === "patterns");
+
+    refreshLogViews();
 }
 
 function storeLogs(logs) {
@@ -528,6 +694,9 @@ for (const id of ["logLevelFilter", "logFunctionFilter", "logContentFilter"]) {
     document.getElementById(id).addEventListener("input", refreshLogViews);
     document.getElementById(id).addEventListener("change", refreshLogViews);
 }
+
+document.getElementById("logsViewBtn").addEventListener("click", () => switchView("logs"));
+document.getElementById("patternsViewBtn").addEventListener("click", () => switchView("patterns"));
 
 window.addEventListener("beforeunload", destroyCharts);
 

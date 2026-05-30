@@ -1,8 +1,36 @@
-"""Pydantic models for the observability dashboard API."""
+"""Pydantic models for the Trainspotter observability dashboard API.
+
+Generic types (PreparedLogEntry, LogHistogram, WindowInfo) are imported from
+spyglass.dashboard.schemas so they stay in sync with the library definition.
+Trainspotter-specific types (display/vbb sections, ObservabilitySummary) live here.
+"""
 
 from typing import Literal
 
 from pydantic import BaseModel
+from spyglass.dashboard.schemas import LogHistogram
+from spyglass.dashboard.schemas import PreparedLogEntry
+from spyglass.dashboard.schemas import WindowInfo
+
+__all__ = [
+    # re-exported from spyglass for backwards compat
+    "LogHistogram",
+    "PreparedLogEntry",
+    "WindowInfo",
+    # Trainspotter-specific
+    "CacheStats",
+    "ChartsSummary",
+    "DisplayStatus",
+    "DisplayStatusValue",
+    "DisplayTotals",
+    "DisplayUptime",
+    "LatencySeries",
+    "ObservabilitySummary",
+    "RouteSeries",
+    "SpyglassStatus",
+    "TimingSummary",
+    "VbbSummary",
+]
 
 DisplayStatusValue = Literal["fresh", "stale", "degraded", "unknown"]
 
@@ -11,13 +39,6 @@ class DisplayStatus(BaseModel):
     status: DisplayStatusValue
     label: str
     based_on: str | None = None
-
-
-class WindowInfo(BaseModel):
-    amount: int
-    unit: str
-    hours: int
-    rollup_minutes: int
 
 
 class TimingSummary(BaseModel):
@@ -39,15 +60,6 @@ class VbbSummary(BaseModel):
     cache: CacheStats
 
 
-class DisplayTotals(BaseModel):
-    fresh: float
-    fallback: float
-    no_snapshot: float
-    failed_responses: float
-    snapshot_age_seconds: float | None
-    uptime: "DisplayUptime"
-
-
 class DisplayUptime(BaseModel):
     fresh_seconds: float
     stale_seconds: float
@@ -58,6 +70,15 @@ class DisplayUptime(BaseModel):
     degraded_pct: float
     unknown_pct: float
     outcome_events: int
+
+
+class DisplayTotals(BaseModel):
+    fresh: float
+    fallback: float
+    no_snapshot: float
+    failed_responses: float
+    snapshot_age_seconds: float | None
+    uptime: DisplayUptime
 
 
 class RouteSeries(BaseModel):
@@ -78,19 +99,6 @@ class ChartsSummary(BaseModel):
     latency_p50_ms: LatencySeries
     vbb_errors: list[float]
     cache_hit_rate_pct: list[float | None]
-
-
-class LogHistogram(BaseModel):
-    labels: list[str]
-    by_level: dict[str, list[int]]
-
-
-class PreparedLogEntry(BaseModel):
-    timestamp: str | None = None
-    level: str | None = None
-    logger_name: str | None = None
-    function: str | None = None
-    message: str | None = None
 
 
 class SpyglassStatus(BaseModel):

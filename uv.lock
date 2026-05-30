@@ -2132,16 +2132,11 @@ wheels = [
 [[package]]
 name = "spyglass"
 version = "0.1.0"
-source = { git = "https://github.com/momonala/spyglass.git?rev=main#d5121fbafb386cd1a678df6025fbbcbc46c7f852" }
+source = { git = "https://github.com/momonala/spyglass.git?rev=main#12484daa8d634c3e74607ab0ae560de03bcd5f5e" }
 dependencies = [
-    { name = "black" },
     { name = "flask" },
-    { name = "isort" },
-    { name = "pytest" },
-    { name = "pytest-cov" },
     { name = "python-dotenv" },
     { name = "requests" },
-    { name = "ruff" },
     { name = "schedule" },
     { name = "sqlalchemy" },
     { name = "typer" },
