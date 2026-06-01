@@ -1,20 +1,18 @@
 import logging
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
-from datetime import timedelta
 from datetime import timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-import requests
 from flask import Flask
 from flask import jsonify
 from flask import make_response
+from flask import redirect
 from flask import render_template
 from flask import request
 from spyglass import MetricsCollector
 from spyglass import configure_logging
-from spyglass.server.site import site as spyglass_site
 
 from .config import FLASK_PORT
 from .config import PROJECT_NAME
@@ -24,16 +22,6 @@ from .datamodels import Station
 from .departures_fallback import get_fallback_departures
 from .departures_fallback import get_snapshot_diagnostics
 from .departures_fallback import store_departures_snapshot
-from .observability import DEFAULT_ROLLUP
-from .observability import DEFAULT_WINDOW_AMOUNT
-from .observability import build_summary
-from .observability import fetch_logs
-from .observability import fetch_metrics
-from .observability import fetch_spyglass_status
-from .observability import parse_rollup
-from .observability import parse_window_amount
-from .observability import parse_window_unit
-from .observability import window_hours_from
 from .quadrants import filter_and_group
 from .utils import config
 from .utils import get_configured_walk_time
@@ -53,7 +41,6 @@ metrics = MetricsCollector(host=SPYGLASS_HOST, project=PROJECT_NAME)
 
 basedir = Path(__file__).parent.parent
 app = Flask(__name__, template_folder=str(basedir / "templates"), static_folder=str(basedir / "static"))
-app.register_blueprint(spyglass_site, url_prefix="/spyglass")
 logging.getLogger("werkzeug").setLevel(logging.WARNING)
 
 # Global state
@@ -106,42 +93,8 @@ def display():
 
 @app.route("/observability")
 def observability():
-    """Render the observability dashboard."""
-    asset_version = int(datetime.now(timezone.utc).timestamp())
-    return render_template("observability.html", asset_version=asset_version, spyglass_url="/spyglass")
-
-
-@app.route("/api/observability/summary")
-def api_observability_summary():
-    """Return aggregated Spyglass metrics and logs for the observability dashboard."""
-    amount = parse_window_amount(request.args.get("amount", default=DEFAULT_WINDOW_AMOUNT, type=int))
-    unit = parse_window_unit(request.args.get("unit", default="hours", type=str))
-    rollup = parse_rollup(request.args.get("rollup", default=DEFAULT_ROLLUP, type=str))
-    window_hours = window_hours_from(amount, unit)
-    since = datetime.now(timezone.utc) - timedelta(hours=window_hours)
-
-    spyglass_status = fetch_spyglass_status()
-    metrics_data: list[dict] = []
-    logs_data: list[dict] = []
-
-    if spyglass_status.reachable:
-        try:
-            metrics_data = fetch_metrics(since)
-            logs_data = fetch_logs(since)
-        except requests.RequestException as error:
-            logger.exception("Spyglass query failed: %s", error)
-            return make_response(jsonify({"error": "Failed to query Spyglass", "detail": str(error)}), 502)
-
-    return jsonify(
-        build_summary(
-            metrics=metrics_data,
-            logs=logs_data,
-            window_amount=amount,
-            window_unit=unit,
-            rollup=rollup,
-            spyglass_status=spyglass_status,
-        ).model_dump()
-    )
+    """Redirect to the Spyglass-hosted observability dashboard."""
+    return redirect(f"http://{SPYGLASS_HOST}/dashboard/trainspotter")
 
 
 @app.route("/api/location", methods=["POST"])
