@@ -150,7 +150,7 @@ def _fetch_display_departures(
         _attach_snapshot_diagnostics(diagnostics, station_id, now)
         return fresh_departures, False, diagnostics
     except VBBAPIError as error:
-        logger.exception("VBB API error: %s", error)
+        logger.debug("VBB API error: %s", error)
         diagnostics["vbb_error"] = str(error)
         _attach_snapshot_diagnostics(diagnostics, station_id, now)
         fallback_departures = get_fallback_departures(station_id, now)
@@ -170,7 +170,7 @@ def _fetch_display_departures(
             metrics.gauge("display.snapshot_age_seconds", age_seconds)
 
         age = snapshot_info.get("snapshot_age") or "unknown"
-        logger.warning(
+        logger.debug(
             "Serving stale snapshot station_id=%s age=%s count=%d",
             station_id,
             age,
