@@ -250,7 +250,7 @@ Each entry in `displaySchedules`:
 | `targetMinutes` | Minutes from Berlin midnight, 0–1439 (e.g. 633 = 10:33). |
 | `targetDate` | Berlin calendar day `YYYY-MM-DD`. Set to tomorrow when `targetMinutes ≤ now` at save time. |
 | `quadrantKey` | Matches `quadrants[].key` from `/api/display/data` (from `config.json` `display.quadrants`). |
-| `activeDepartureKey` | Runtime fingerprint `"{line}:{minutes}"` of the auto-selected departure; cleared when no match. |
+| `activeDepartureKey` | Runtime fingerprint `"{line}:{departureMsTimestamp}"` of the auto-selected departure; keyed on absolute departure time so the same physical train is stable across API refreshes. Cleared when no match. |
 
 Legacy schedules without `targetDate` default to today on load.
 
@@ -266,7 +266,7 @@ Evaluated on every successful poll **and** every 1 s clock tick.
    - `earliestMs ≤ depMs ≤ latestMs`
 4. **Ideal train** — latest `depMs` among candidates (the train closest to your deadline).
 5. **Trigger** — auto-zoom as soon as the ideal train appears in the window (no minimum-minutes-away gate). Alarm (≤ 7 min) and auto-dismiss (≤ 5 min) behave identically to a manual tap.
-6. **Upgrade** — if a later ideal train appears while one is already selected, soft beep + switch zoom.
+6. **Upgrade** — if a later ideal train appears while one is already selected, a single ding (sine bell tone, distinct from the main alarm) plays and the zoom switches to the new train.
 
 **Example (target 10:30):** when a train departing 10:20–10:30 first appears in the API (could be 10–15 min ahead of the window opening), the zoom opens immediately. The alarm at ≤ 7 min then fires to tell you to leave home.
 
@@ -292,14 +292,15 @@ flowchart TD
 
   subgraph matcher [pickDepartureForSchedule]
     Target["targetMs from targetDate + targetMinutes"]
-    Window["window: target−5min … target"]
+    Window["window: target−10min … target"]
     Filter["filter quadrant departures in window"]
-    Latest["pick latest depMs"]
-    Trigger{"dep.minutes ≤ 5?"}
+    Latest["pick latest depMs (closest to deadline)"]
+    Trigger{"key changed since last eval?"}
   end
 
   subgraph output [Output]
     Zoom["openZoom → alarm at ≤7 min"]
+    Upgrade["ding + switch zoom (upgrade)"]
     Idle["no action"]
   end
 
@@ -310,8 +311,9 @@ flowchart TD
   Window --> Filter
   Filter --> Latest
   Latest --> Trigger
-  Trigger -->|yes| Zoom
-  Trigger -->|no| Idle
+  Trigger -->|"new train, no zoom active"| Zoom
+  Trigger -->|"better train, zoom active"| Upgrade
+  Trigger -->|no change| Idle
 ```
 
 ---

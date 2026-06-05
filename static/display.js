@@ -215,7 +215,7 @@ function renderAgedQuadrantsIfNeeded(nowMs = Date.now()) {
  */
 function resolveDisplayStatus() {
     if (state.lastData) {
-        if (state.lastData.used_fallback || state.lastError) {
+        if (state.lastData.used_fallback) {
             return 'stale';
         }
         return 'fresh';
@@ -251,13 +251,11 @@ function getStatusBadgeText(status) {
     if (status !== 'stale') {
         return null;
     }
-    if (state.lastError && state.lastData) {
-        if (state.lastData.used_fallback) {
-            return '⚠\u2009stale snapshot · can\u2019t refresh';
-        }
-        return '⚠\u2009can\u2019t refresh · showing last known';
+    // Status is 'stale' only when used_fallback is true
+    if (state.lastData?.used_fallback) {
+        return '⚠ stale snapshot · VBB unreachable';
     }
-    return '⚠\u2009stale snapshot · VBB unreachable';
+    return null;
 }
 
 function updateClock() {
@@ -363,6 +361,20 @@ function beepOnce() {
         osc.start(audioCtx.currentTime + t);
         osc.stop(audioCtx.currentTime + t + 0.13);
     });
+}
+
+function dingOnce() {
+    if (muted || !audioCtx || audioCtx.state !== 'running') return;
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.type = 'sine';
+    osc.frequency.value = 1046;  // C6 — bright bell tone
+    gain.gain.setValueAtTime(0.4, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.8);
+    osc.start(audioCtx.currentTime);
+    osc.stop(audioCtx.currentTime + 0.8);
 }
 
 function playAlarm() {
@@ -1288,8 +1300,8 @@ function saveSchedule() {
 // =============================================================================
 
 /** Stable fingerprint for a departure — used to detect a new/changed selection. */
-function departureKey(dep) {
-    return `${dep.line}:${dep.minutes}`;
+function departureKey(dep, nowMs) {
+    return `${dep.line}:${departureMsFromFloorMinutes(dep, nowMs)}`;
 }
 
 /**
@@ -1313,7 +1325,8 @@ function pickDepartureForSchedule(schedule, quadrant, nowMs) {
     let ideal = null;
 
     for (const dep of (quadrant.departures ?? [])) {
-        const depMs = departureMsFromFloorMinutes(dep, nowMs);
+        // Use raw floor time (no +59s) for window bounds — the offset is only for zoom display alignment.
+        const depMs = nowMs + dep.minutes * 60_000;
         const inWindow = depMs >= earliestMs && depMs <= targetMs;
 
         if (!inWindow) continue;
@@ -1352,7 +1365,7 @@ function evaluateSchedules() {
             continue;
         }
 
-        const newKey = departureKey(pick);
+        const newKey = departureKey(pick, state.lastUpdatedAt ?? nowMs);
         const prevKey = schedule.activeDepartureKey;
 
         if (newKey === prevKey) {
@@ -1369,8 +1382,8 @@ function evaluateSchedules() {
         console.info(`[evaluateSchedules] auto-zoom for schedule "${formatScheduleLabel(schedule)}" → ${newKey} (upgrade: ${isUpgrade})`);
 
         if (isUpgrade) {
-            // Better train found — soft beep then switch
-            beepOnce();
+            // Skip ding if openZoom will immediately fire the main alarm anyway
+            if (pick.minutes > 7) dingOnce();
             closeZoom();
         }
 
