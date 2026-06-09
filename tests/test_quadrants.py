@@ -7,11 +7,14 @@ from unittest.mock import Mock
 
 import pytest
 
+from src.quadrants import DepartureSlot
 from src.quadrants import QuadrantData
 from src.quadrants import filter_and_group
 
 
-def _make_departure(line_name: str, minutes_until: int, direction: str | None = "↑") -> Mock:
+def _make_departure(
+    line_name: str, minutes_until: int, direction: str | None = "↑", provenance: str = "Endstation"
+) -> Mock:
     """Build a minimal mock Departure with the fields filter_and_group needs."""
     location = Mock(latitude=52.5, longitude=13.4)
     stop = Mock(location=location)
@@ -23,6 +26,7 @@ def _make_departure(line_name: str, minutes_until: int, direction: str | None = 
     dep.stop = stop
     dep.destination = destination
     dep.when = datetime.now(timezone.utc) + timedelta(minutes=minutes_until)
+    dep.provenance = provenance
     return dep
 
 
@@ -74,9 +78,10 @@ def test_filter_and_group_includes_departures_above_min_minutes(now):
         result = filter_and_group([dep], now, QUADRANTS_CONFIG, min_minutes=5)
     s1_up = result[0]
     assert len(s1_up.departures) == 1
-    minutes, line = s1_up.departures[0]
-    assert line == "S1"
-    assert 9 <= minutes <= 11
+    slot = s1_up.departures[0]
+    assert slot.line == "S1"
+    assert slot.provenance == "Endstation"
+    assert 9 <= slot.minutes <= 11
 
 
 def test_filter_and_group_caps_at_max_per_quadrant(now):
@@ -96,7 +101,7 @@ def test_filter_and_group_sorts_by_soonest(now):
     with pytest.MonkeyPatch().context() as mp:
         mp.setattr("src.quadrants.compute_direction", lambda _: "↑")
         result = filter_and_group(deps, now, QUADRANTS_CONFIG, min_minutes=5, max_per_quadrant=2)
-    minutes_list = [m for m, _ in result[0].departures]
+    minutes_list = [s.minutes for s in result[0].departures]
     assert minutes_list == sorted(minutes_list)
 
 
@@ -116,8 +121,9 @@ def test_filter_and_group_routes_by_direction(now):
 
 
 def test_quadrant_data_dataclass():
-    q = QuadrantData(key="s1_up", label="S1/26", arrow="↑", departures=[(7, "S1")])
+    slot = DepartureSlot(minutes=7, line="S1", provenance="Oranienburg")
+    q = QuadrantData(key="s1_up", label="S1/26", arrow="↑", departures=[slot])
     assert q.key == "s1_up"
     assert q.label == "S1/26"
     assert q.arrow == "↑"
-    assert q.departures == [(7, "S1")]
+    assert q.departures == [slot]

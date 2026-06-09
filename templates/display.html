@@ -108,6 +108,14 @@
             <div class="schedule-quadrant-grid" id="schedule-quadrant-grid"
                  role="group" aria-label="Direction"></div>
 
+            <!-- Line filter — shown after quadrant is selected -->
+            <div class="schedule-filters" id="schedule-filters" hidden>
+                <div class="schedule-filter-row">
+                    <label class="schedule-section-label" for="schedule-line-select">Specify Line</label>
+                    <select id="schedule-line-select" class="schedule-select"></select>
+                </div>
+            </div>
+
             <!-- Actions -->
             <div class="schedule-modal-actions">
                 <button type="button" id="schedule-cancel-btn"

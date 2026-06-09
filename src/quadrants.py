@@ -9,6 +9,13 @@ from .utils import get_direction
 from .utils import get_initial_bearing
 
 
+@dataclass(frozen=True)
+class DepartureSlot:
+    minutes: int
+    line: str
+    provenance: str
+
+
 @dataclass
 class QuadrantData:
     """One quadrant's display data: key, label, arrow, and upcoming departures."""
@@ -16,7 +23,7 @@ class QuadrantData:
     key: str
     label: str
     arrow: str
-    departures: list[tuple[int, str]]  # (minutes_until, line_name)
+    departures: list[DepartureSlot]
 
 
 def compute_direction(dep: Departure) -> str | None:
@@ -50,7 +57,7 @@ def filter_and_group(
     """
     lines_by_key = {q["key"]: set(q["lines"]) for q in quadrants_config}
     direction_by_key = {q["key"]: q["direction"] for q in quadrants_config}
-    groups: dict[str, list[tuple[int, str]]] = {q["key"]: [] for q in quadrants_config}
+    groups: dict[str, list[DepartureSlot]] = {q["key"]: [] for q in quadrants_config}
 
     for dep in departures:
         line = dep.line.name
@@ -64,11 +71,11 @@ def filter_and_group(
 
         for key, lines in lines_by_key.items():
             if line in lines and direction_by_key[key] == direction:
-                groups[key].append((minutes, line))
+                groups[key].append(DepartureSlot(minutes=minutes, line=line, provenance=dep.provenance))
                 break
 
     for key in groups:
-        groups[key] = sorted(groups[key], key=lambda x: x[0])[:max_per_quadrant]
+        groups[key] = sorted(groups[key], key=lambda s: s.minutes)[:max_per_quadrant]
 
     return [
         QuadrantData(key=q["key"], label=q["label"], arrow=q["direction"], departures=groups[q["key"]])

@@ -913,6 +913,45 @@ body::before {
     font-weight: 600;
 }
 
+/* ── Line / provenance filters ───────────────────────────── */
+
+.schedule-filters {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.schedule-filter-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.schedule-filter-row .schedule-section-label {
+    flex-shrink: 0;
+    min-width: 68px;
+}
+
+.schedule-select {
+    flex: 1;
+    background: var(--d-glass-bg);
+    border: 1px solid var(--d-glass-border);
+    border-radius: 10px;
+    color: var(--d-text-primary);
+    font-size: 14px;
+    padding: 8px 12px;
+    appearance: none;
+    -webkit-appearance: none;
+    cursor: pointer;
+    outline: none;
+}
+
+.schedule-select:focus {
+    border-color: rgba(100, 180, 255, 0.60);
+}
+
 /* Action buttons */
 .schedule-modal-actions {
     display: flex;

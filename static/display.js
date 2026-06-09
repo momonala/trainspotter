@@ -1015,7 +1015,8 @@ function removeSchedule(id) {
 function formatScheduleLabel(schedule) {
     const h = String(Math.floor(schedule.targetMinutes / 60)).padStart(2, '0');
     const m = String(schedule.targetMinutes % 60).padStart(2, '0');
-    const time = `${h}:${m} ${schedule.arrow}`;
+    const lineStr = schedule.lineFilter ?? schedule.label;
+    const time = `${h}:${m} ${lineStr} ${schedule.arrow}`;
 
     if (schedule.repeatDays?.length) {
         const dayStr = DAYS_OF_WEEK
@@ -1070,6 +1071,7 @@ function renderScheduleBadges() {
 let scheduleModalEditId = null;
 let scheduleModalSelectedQuadrantKey = null;
 let scheduleModalSelectedDays = new Set();
+let scheduleModalLineFilter = null; // null = whole quadrant
 
 function berlinNow() {
     const { hours, minutes } = berlinParts();
@@ -1170,6 +1172,7 @@ function buildQuadrantPicker() {
         btn.append(arrow, label);
         btn.addEventListener('click', () => {
             scheduleModalSelectedQuadrantKey = q.key;
+            scheduleModalLineFilter = null;
             // Update all button states
             grid.querySelectorAll('.schedule-quadrant-btn').forEach(b => {
                 const isSelected = b.dataset.key === q.key;
@@ -1177,10 +1180,43 @@ function buildQuadrantPicker() {
                 b.setAttribute('aria-pressed', String(isSelected));
             });
             document.getElementById('schedule-save-btn').disabled = false;
+            buildFilterPickers(q.key);
         });
 
         grid.appendChild(btn);
     }
+}
+
+function buildFilterPickers(quadrantKey) {
+    const filtersEl = document.getElementById('schedule-filters');
+    const lineSelect = document.getElementById('schedule-line-select');
+    if (!filtersEl || !lineSelect) return;
+
+    const quadrant = quadrantKey ? state.quadrantsByKey.get(quadrantKey) : null;
+
+    if (!quadrant) {
+        filtersEl.hidden = true;
+        return;
+    }
+
+    lineSelect.innerHTML = '';
+    const defaultOpt = document.createElement('option');
+    defaultOpt.value = '';
+    defaultOpt.textContent = quadrant.label; // e.g. "S8/85"
+    lineSelect.appendChild(defaultOpt);
+
+    const lines = [...(quadrant.lines ?? [])].sort();
+    for (const line of lines) {
+        const el = document.createElement('option');
+        el.value = line;
+        el.textContent = line;
+        if (line === scheduleModalLineFilter) el.selected = true;
+        lineSelect.appendChild(el);
+    }
+
+    lineSelect.onchange = () => { scheduleModalLineFilter = lineSelect.value || null; };
+
+    filtersEl.hidden = false;
 }
 
 function buildDayPicker() {
@@ -1222,6 +1258,7 @@ function openScheduleModal(editId = null) {
     scheduleModalEditId = editId ?? null;
     scheduleModalSelectedQuadrantKey = editing?.quadrantKey ?? null;
     scheduleModalSelectedDays = new Set(editing?.repeatDays ?? []);
+    scheduleModalLineFilter = editing?.lineFilter ?? null;
 
     const title = document.getElementById('schedule-modal-title');
     if (title) title.textContent = editing ? 'Edit Reminder' : 'Schedule Reminder';
@@ -1256,6 +1293,8 @@ function openScheduleModal(editId = null) {
     buildDayPicker();
     buildQuadrantPicker();
 
+    buildFilterPickers(scheduleModalSelectedQuadrantKey);
+
     overlay.hidden = false;
     overlay.classList.remove('closing');
     requestAnimationFrame(() => saveBtn?.focus());
@@ -1286,6 +1325,7 @@ function saveSchedule() {
         quadrantKey: quadrantData.key,
         label: quadrantData.label,
         arrow: quadrantData.arrow,
+        lineFilter: scheduleModalLineFilter,
         activeDepartureKey: null,
     };
 
@@ -1335,6 +1375,8 @@ function pickDepartureForSchedule(schedule, quadrant, nowMs) {
     let ideal = null;
 
     for (const dep of (quadrant.departures ?? [])) {
+        if (schedule.lineFilter && dep.line !== schedule.lineFilter) continue;
+
         // Use raw floor time (no +59s) for window bounds — the offset is only for zoom display alignment.
         const depMs = nowMs + dep.minutes * 60_000;
         const inWindow = depMs >= earliestMs && depMs <= targetMs;
