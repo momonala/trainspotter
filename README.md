@@ -238,6 +238,7 @@ Each entry in `displaySchedules`:
   "id": "uuid",
   "targetMinutes": 633,
   "targetDate": "2026-05-24",
+  "repeatDays": [],
   "quadrantKey": "s1_26_down",
   "label": "S1/26",
   "arrow": "↓",
@@ -248,11 +249,12 @@ Each entry in `displaySchedules`:
 | Field | Description |
 |-------|-------------|
 | `targetMinutes` | Minutes from Berlin midnight, 0–1439 (e.g. 633 = 10:33). |
-| `targetDate` | Berlin calendar day `YYYY-MM-DD`. Set to tomorrow when `targetMinutes ≤ now` at save time. |
+| `targetDate` | Berlin calendar day `YYYY-MM-DD` for one-time schedules. `null` for repeating schedules (date is computed dynamically from `repeatDays`). Set to tomorrow when `targetMinutes ≤ now` at save time. |
+| `repeatDays` | JS day-of-week values (0=Sun … 6=Sat) on which the reminder repeats. Empty array = one-time. When non-empty, `targetDate` is `null` and the next matching calendar day is computed each evaluation. |
 | `quadrantKey` | Matches `quadrants[].key` from `/api/display/data` (from `config.json` `display.quadrants`). |
 | `activeDepartureKey` | Runtime fingerprint `"{line}:{departureMsTimestamp}"` of the auto-selected departure; keyed on absolute departure time so the same physical train is stable across API refreshes. Cleared when no match. |
 
-Legacy schedules without `targetDate` default to today on load.
+Legacy schedules without `targetDate` default to today on load. Legacy schedules without `repeatDays` default to `[]` (one-time) on load.
 
 #### Spec: selection algorithm (`pickDepartureForSchedule`)
 
@@ -261,7 +263,7 @@ Evaluated on every successful poll **and** every 1 s clock tick.
 1. **Target instant** — `targetDate` + `targetMinutes` in Europe/Berlin. Skip if target is in the past.
 2. **Window** — `earliestMs = targetMs − 10 min`, `latestMs = targetMs`.
 3. **Candidates** — departures in the scheduled quadrant where:
-   - `depMs = now + dep.minutes×60s + 59s` (matches zoom modal floor semantics)
+   - `depMs = now + dep.minutes×60s` (raw floor minutes — the +59s offset is only for zoom display alignment, not window matching)
    - `depMs > now` (has not left)
    - `earliestMs ≤ depMs ≤ latestMs`
 4. **Ideal train** — latest `depMs` among candidates (the train closest to your deadline).
@@ -365,7 +367,7 @@ Flask port is set in `pyproject.toml` under `[tool.config]`.
 | `max_nearby_straightline_m` | No | int (meters) | Radius filter for stop selection from snapshot. Default: `1500`. |
 | `max_dashboard_stations` | No | int | Caps the number of stops shown on the dashboard. No limit if absent. |
 | `update_interval_min` | Yes | int (minutes) | VBB `duration` query param — fetch departures within this window. |
-| `min_departure_time_min` | Yes | int (minutes) | Hide departures with fewer than this many minutes remaining. |
+| `min_departure_time_min` | Yes | int (minutes) | Hide departures with fewer than this many minutes remaining (threshold is exclusive — a departure exactly at this value is shown). |
 | `display.station_id` | Yes (display) | str | VBB stop ID used by `GET /api/display/data`. |
 | `display.station_name` | Yes (display) | str | Display name shown in the header of the display page. |
 | `display.quadrants` | Yes (display) | list[4] | Exactly 4 entries. Each: `key` (str), `label` (str), `lines` (list[str]), `direction` (arrow symbol). Order: top-left, top-right, bottom-left, bottom-right. |

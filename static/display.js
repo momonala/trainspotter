@@ -181,7 +181,7 @@ function ageDisplayData(data, fetchedAtMs, nowMs = Date.now()) {
         ...q,
         departures: (q.departures ?? [])
             .map(dep => ({ ...dep, minutes: dep.minutes - elapsedMin }))
-            .filter(dep => dep.minutes > minMinutes),
+            .filter(dep => dep.minutes >= minMinutes),
     }));
 
     return { ...data, quadrants };
@@ -426,6 +426,15 @@ function updateZoomDisplay() {
         zoom.autoCloseArmed = false;
         closeZoom();
     }
+
+    syncVbbWarning();
+}
+
+function syncVbbWarning() {
+    const el = document.getElementById('modal-vbb-warning');
+    if (!el) return;
+    const vbbDown = !!(state.lastData?.used_fallback || state.lastError);
+    el.hidden = !vbbDown;
 }
 
 /** Floor-minute departures need +59s so Math.floor matches the badge on open. */
@@ -468,6 +477,7 @@ function openZoom(dep, arrow) {
     }
 
     updateZoomDisplay();
+    syncVbbWarning();
 
     const overlay = document.getElementById('modal-overlay');
     if (overlay) {
@@ -1373,11 +1383,15 @@ function evaluateSchedules() {
         }
 
         const isUpgrade = prevKey !== null;  // switching from one dep to a better one
-        schedule.activeDepartureKey = newKey;
 
+        // Guard before updating key: if zoom is already open from a manual tap and this is a
+        // first-time match (not an upgrade), skip without consuming the key so the alarm can
+        // still fire once the manual zoom closes.
         if (zoom.active && !isUpgrade) {
             continue;
         }
+
+        schedule.activeDepartureKey = newKey;
 
         console.info(`[evaluateSchedules] auto-zoom for schedule "${formatScheduleLabel(schedule)}" → ${newKey} (upgrade: ${isUpgrade})`);
 

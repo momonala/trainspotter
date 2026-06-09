@@ -535,6 +535,17 @@ body::before {
     letter-spacing: 1px;
 }
 
+.modal-vbb-warning {
+    font-size: 15px;
+    font-weight: 400;
+    color: #f5a623;
+    text-align: center;
+    max-width: 340px;
+    line-height: 1.4;
+    margin: 0;
+    opacity: 0.9;
+}
+
 /* ── Urgent badge (≤ 7 min) — main grid, no alarm ────────── */
 .departure-badge.urgent .departure-minutes {
     color: var(--d-error-color);

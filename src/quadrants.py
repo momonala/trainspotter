@@ -59,7 +59,7 @@ def filter_and_group(
             continue
 
         minutes = int((dep.when - now).total_seconds() / 60)
-        if minutes <= min_minutes:
+        if minutes < min_minutes:
             continue
 
         for key, lines in lines_by_key.items():

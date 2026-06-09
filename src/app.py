@@ -47,6 +47,7 @@ logging.getLogger("werkzeug").setLevel(logging.WARNING)
 browser_coordinates = None
 cached_stations = None
 COORDINATE_ACCURACY_DECIMALS = 3
+DISPLAY_MAX_PER_QUADRANT = 3
 
 
 def _station_board_row(station: Station, user_coords: tuple[float, float] | None) -> dict:
@@ -207,7 +208,7 @@ def api_display_data():
             now,
             quadrants_config=display_config["quadrants"],
             min_minutes=config["min_departure_time_min"],
-            max_per_quadrant=3,
+            max_per_quadrant=DISPLAY_MAX_PER_QUADRANT,
         )
 
         walk_time = get_configured_walk_time(display_config["station_name"])
