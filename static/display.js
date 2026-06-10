@@ -1295,6 +1295,9 @@ function openScheduleModal(editId = null) {
 
     buildFilterPickers(scheduleModalSelectedQuadrantKey);
 
+    const vbbWarning = document.getElementById('schedule-vbb-warning');
+    if (vbbWarning) vbbWarning.hidden = !(state.lastData?.used_fallback || state.lastError);
+
     overlay.hidden = false;
     overlay.classList.remove('closing');
     requestAnimationFrame(() => saveBtn?.focus());
