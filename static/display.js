@@ -1016,22 +1016,22 @@ function formatScheduleLabel(schedule) {
     const h = String(Math.floor(schedule.targetMinutes / 60)).padStart(2, '0');
     const m = String(schedule.targetMinutes % 60).padStart(2, '0');
     const lineStr = schedule.lineFilter ?? schedule.label;
-    const time = `${h}:${m} ${lineStr} ${schedule.arrow}`;
+    const parts = [`${h}:${m} ${lineStr} ${schedule.arrow}`];
 
     if (schedule.repeatDays?.length) {
-        const dayStr = DAYS_OF_WEEK
-            .filter(d => schedule.repeatDays.includes(d.dow))
-            .map(d => d.label)
-            .join(' ');
-        return `${time} · ${dayStr}`;
+        parts.push(DAYS_OF_WEEK.filter(d => schedule.repeatDays.includes(d.dow)).map(d => d.label).join(' '));
+    } else {
+        const today = berlinDateString();
+        if (schedule.targetDate && schedule.targetDate !== today) {
+            parts.push(schedule.targetDate === berlinTomorrowDateString() ? 'tomorrow' : schedule.targetDate);
+        }
     }
 
-    const today = berlinDateString();
-    if (schedule.targetDate && schedule.targetDate !== today) {
-        const suffix = schedule.targetDate === berlinTomorrowDateString() ? 'tomorrow' : schedule.targetDate;
-        return `${time} · ${suffix}`;
+    if (schedule.triggerMinutes != null) {
+        parts.push(`≤${schedule.triggerMinutes}m`);
     }
-    return time;
+
+    return parts.join(' · ');
 }
 
 function renderScheduleBadges() {
@@ -1071,7 +1071,16 @@ function renderScheduleBadges() {
 let scheduleModalEditId = null;
 let scheduleModalSelectedQuadrantKey = null;
 let scheduleModalSelectedDays = new Set();
-let scheduleModalLineFilter = null; // null = whole quadrant
+let scheduleModalLineFilter = null;       // null = whole quadrant
+let scheduleModalTriggerMinutes = null;   // null = ASAP, number = ≤N minutes before departure
+
+const NOTIFY_OPTIONS = [
+    { value: null, label: 'ASAP' },
+    { value: 15,   label: '≤15m' },
+    { value: 12,   label: '≤12m' },
+    { value: 10,   label: '≤10m' },
+    { value: 7,    label: '≤7m' },
+];
 
 function berlinNow() {
     const { hours, minutes } = berlinParts();
@@ -1219,6 +1228,34 @@ function buildFilterPickers(quadrantKey) {
     filtersEl.hidden = false;
 }
 
+function buildNotifyPicker() {
+    const grid = document.getElementById('schedule-notify-grid');
+    if (!grid) return;
+    grid.innerHTML = '';
+
+    for (const opt of NOTIFY_OPTIONS) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'schedule-notify-btn';
+        btn.dataset.value = opt.value ?? '';
+        btn.textContent = opt.label;
+        const isSelected = opt.value === scheduleModalTriggerMinutes;
+        btn.classList.toggle('selected', isSelected);
+        btn.setAttribute('aria-pressed', String(isSelected));
+
+        btn.addEventListener('click', () => {
+            scheduleModalTriggerMinutes = opt.value;
+            grid.querySelectorAll('.schedule-notify-btn').forEach(b => {
+                const isThis = b === btn;
+                b.classList.toggle('selected', isThis);
+                b.setAttribute('aria-pressed', String(isThis));
+            });
+        });
+
+        grid.appendChild(btn);
+    }
+}
+
 function buildDayPicker() {
     const grid = document.getElementById('schedule-day-grid');
     if (!grid) return;
@@ -1259,6 +1296,7 @@ function openScheduleModal(editId = null) {
     scheduleModalSelectedQuadrantKey = editing?.quadrantKey ?? null;
     scheduleModalSelectedDays = new Set(editing?.repeatDays ?? []);
     scheduleModalLineFilter = editing?.lineFilter ?? null;
+    scheduleModalTriggerMinutes = editing?.triggerMinutes ?? null;
 
     const title = document.getElementById('schedule-modal-title');
     if (title) title.textContent = editing ? 'Edit Reminder' : 'Schedule Reminder';
@@ -1294,6 +1332,7 @@ function openScheduleModal(editId = null) {
     buildQuadrantPicker();
 
     buildFilterPickers(scheduleModalSelectedQuadrantKey);
+    buildNotifyPicker();
 
     const vbbWarning = document.getElementById('schedule-vbb-warning');
     if (vbbWarning) vbbWarning.hidden = !(state.lastData?.used_fallback || state.lastError);
@@ -1329,6 +1368,7 @@ function saveSchedule() {
         label: quadrantData.label,
         arrow: quadrantData.arrow,
         lineFilter: scheduleModalLineFilter,
+        triggerMinutes: scheduleModalTriggerMinutes,
         activeDepartureKey: null,
     };
 
@@ -1391,7 +1431,12 @@ function pickDepartureForSchedule(schedule, quadrant, nowMs) {
         }
     }
 
-    return ideal?.dep ?? null;
+    if (!ideal) return null;
+
+    // Hold off until the train is within the configured trigger window.
+    if (schedule.triggerMinutes != null && ideal.dep.minutes > schedule.triggerMinutes) return null;
+
+    return ideal.dep;
 }
 
 /**
