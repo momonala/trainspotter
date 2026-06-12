@@ -1420,7 +1420,15 @@ function evaluateSchedules() {
             continue;
         }
 
-        const newKey = departureKey(pick, state.lastUpdatedAt ?? nowMs);
+        // Recover original (unaged) departure time to keep the key stable across
+        // per-minute aging. state.quadrantsByKey is rebuilt from aged data so
+        // pick.minutes decrements each minute; adding elapsedMin gives the
+        // original fetch-relative minutes, producing a constant key between fetches.
+        const elapsedMin = state.lastUpdatedAt != null
+            ? Math.floor((nowMs - state.lastUpdatedAt) / 60_000)
+            : 0;
+        const stableMs = (state.lastUpdatedAt ?? nowMs) + (pick.minutes + elapsedMin) * 60_000 + FLOOR_MINUTES_OFFSET_MS;
+        const newKey = `${pick.line}:${stableMs}`;
         const prevKey = schedule.activeDepartureKey;
 
         if (newKey === prevKey) {
