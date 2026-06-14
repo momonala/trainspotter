@@ -11,8 +11,19 @@ const DISPLAY_CONFIG = {
 };
 
 const SCHEDULE_CONFIG = {
-    WINDOW_MIN: 10,  // acceptable window before target: [target − WINDOW_MIN, target]
     LS_KEY: 'displaySchedules',
+    DEFAULT_TOLERANCE_MIN: 4,  // ± window default: [target − N, target + N]
+    MAX_TOLERANCE_MIN: 25,     // tolerance wheel runs 0…MAX
+};
+
+// Direction arrow → human label for the route picker wheel.
+const DIRECTION_LABELS = {
+    '↑': 'Up',
+    '↓': 'Down',
+    '←': 'Left',
+    '→': 'Right',
+    '↻': 'Clockwise',
+    '↺': 'Counter',
 };
 
 const FLOOR_MINUTES_OFFSET_MS = 59_000;
@@ -871,9 +882,12 @@ window.addEventListener('DOMContentLoaded', () => {
  *   id: string,
  *   targetMinutes: number,            — minutes from midnight (0–1439)
  *   targetDate: string,               — 'YYYY-MM-DD' Berlin calendar day
+ *   repeatDays: number[],             — JS dow values (0=Sun…6=Sat); [] = one-time
  *   quadrantKey: string,
  *   label: string,
  *   arrow: string,
+ *   lineFilter: string|null,          — single line within the group, or null for all
+ *   toleranceMinutes: number,         — ± window half-width around targetMinutes
  *   activeDepartureKey: string|null,
  * }
  */
@@ -991,6 +1005,7 @@ function loadSchedules() {
         ...s,
         targetDate: s.targetDate ?? today,
         repeatDays: s.repeatDays ?? [],
+        toleranceMinutes: s.toleranceMinutes ?? SCHEDULE_CONFIG.DEFAULT_TOLERANCE_MIN,
     }));
 }
 
@@ -1027,9 +1042,7 @@ function formatScheduleLabel(schedule) {
         }
     }
 
-    if (schedule.triggerMinutes != null) {
-        parts.push(`≤${schedule.triggerMinutes}m`);
-    }
+    parts.push(`±${schedule.toleranceMinutes ?? SCHEDULE_CONFIG.DEFAULT_TOLERANCE_MIN}m`);
 
     return parts.join(' · ');
 }
@@ -1069,35 +1082,35 @@ function renderScheduleBadges() {
 // =============================================================================
 
 let scheduleModalEditId = null;
-let scheduleModalSelectedQuadrantKey = null;
+let scheduleModalSelectedQuadrantKey = null;  // resolved from the route wheels; null when invalid
 let scheduleModalSelectedDays = new Set();
-let scheduleModalLineFilter = null;       // null = whole quadrant
-let scheduleModalTriggerMinutes = null;   // null = ASAP, number = ≤N minutes before departure
+let scheduleModalLineFilter = null;           // null = whole group/quadrant
 
-const NOTIFY_OPTIONS = [
-    { value: null, label: 'ASAP' },
-    { value: 15,   label: '≤15m' },
-    { value: 12,   label: '≤12m' },
-    { value: 10,   label: '≤10m' },
-    { value: 7,    label: '≤7m' },
-];
+// Route wheel options, rebuilt from live quadrant data when the modal opens.
+let scheduleDirectionOptions = [];  // [{ arrow, label }]
+let scheduleLineOptions = [];       // [string] — group labels first, then individual lines
 
 function berlinNow() {
     const { hours, minutes } = berlinParts();
     return { hours, minutes };
 }
 
-/** Populate a wheel element with padded number items from 0..max-1. */
-function buildWheelItems(wheelEl, count, padLen) {
+/** Populate a wheel element with one item per label string. */
+function fillWheel(wheelEl, labels) {
     wheelEl.innerHTML = '';
-    for (let i = 0; i < count; i++) {
+    labels.forEach((label, i) => {
         const item = document.createElement('div');
         item.className = 'schedule-wheel-item';
-        item.dataset.value = i;
+        item.dataset.index = i;
         item.setAttribute('role', 'option');
-        item.textContent = String(i).padStart(padLen, '0');
+        item.textContent = label;
         wheelEl.appendChild(item);
-    }
+    });
+}
+
+/** Numeric wheel labels 0..count-1, zero-padded to padLen. */
+function numberWheelLabels(count, padLen) {
+    return Array.from({ length: count }, (_, i) => String(i).padStart(padLen, '0'));
 }
 
 function scrollWheelTo(wheelEl, value) {
@@ -1143,117 +1156,140 @@ function throttledUpdateScheduleDateHint() {
     });
 }
 
-function buildQuadrantPicker() {
-    const grid = document.getElementById('schedule-quadrant-grid');
-    if (!grid) return;
-    grid.innerHTML = '';
+// =============================================================================
+// Scheduler — tolerance & route wheels
+// =============================================================================
 
+function buildToleranceWheel(toleranceMinutes) {
+    const wheel = document.getElementById('schedule-wheel-tolerance');
+    if (!wheel) return;
+    fillWheel(wheel, numberWheelLabels(SCHEDULE_CONFIG.MAX_TOLERANCE_MIN + 1, 1));
+    requestAnimationFrame(() => scrollWheelTo(wheel, toleranceMinutes));
+}
+
+function readToleranceMinutes() {
+    const wheel = document.getElementById('schedule-wheel-tolerance');
+    if (!wheel) return SCHEDULE_CONFIG.DEFAULT_TOLERANCE_MIN;
+    return readWheelValue(wheel, SCHEDULE_CONFIG.MAX_TOLERANCE_MIN + 1);
+}
+
+/** Derive direction + line wheel options from live quadrant data (encounter order). */
+function buildRouteOptions() {
     const quadrants = state.lastData?.quadrants ?? [];
-    if (quadrants.length === 0) {
-        const msg = document.createElement('p');
-        msg.style.cssText = 'color: var(--d-text-secondary); font-size: 13px; text-align: center;';
-        msg.textContent = 'Waiting for live data…';
-        grid.appendChild(msg);
-        return;
-    }
 
+    const arrows = [];
     for (const q of quadrants) {
-        const btn = document.createElement('button');
-        btn.className = 'schedule-quadrant-btn';
-        btn.type = 'button';
-        btn.dataset.key = q.key;
-        btn.setAttribute('aria-pressed', 'false');
-        btn.setAttribute('aria-label', `${q.label} ${q.arrow}`);
-
-        if (q.key === scheduleModalSelectedQuadrantKey) {
-            btn.classList.add('selected');
-            btn.setAttribute('aria-pressed', 'true');
-        }
-
-        const arrow = document.createElement('span');
-        arrow.className = 'schedule-quadrant-btn__arrow';
-        arrow.textContent = q.arrow;
-
-        const label = document.createElement('span');
-        label.className = 'schedule-quadrant-btn__label';
-        label.textContent = q.label;
-
-        btn.append(arrow, label);
-        btn.addEventListener('click', () => {
-            scheduleModalSelectedQuadrantKey = q.key;
-            scheduleModalLineFilter = null;
-            // Update all button states
-            grid.querySelectorAll('.schedule-quadrant-btn').forEach(b => {
-                const isSelected = b.dataset.key === q.key;
-                b.classList.toggle('selected', isSelected);
-                b.setAttribute('aria-pressed', String(isSelected));
-            });
-            document.getElementById('schedule-save-btn').disabled = false;
-            buildFilterPickers(q.key);
-        });
-
-        grid.appendChild(btn);
+        if (!arrows.includes(q.arrow)) arrows.push(q.arrow);
     }
+    scheduleDirectionOptions = arrows.map(arrow => ({ arrow, label: DIRECTION_LABELS[arrow] ?? arrow }));
+
+    const groups = [];
+    for (const q of quadrants) {
+        if (!groups.includes(q.label)) groups.push(q.label);
+    }
+    const lines = [];
+    for (const q of quadrants) {
+        for (const line of (q.lines ?? [])) {
+            if (!lines.includes(line)) lines.push(line);
+        }
+    }
+    lines.sort();
+    // Group labels ("S1/26") first, then individual lines ("S1", "S25", …).
+    scheduleLineOptions = [...groups, ...lines];
 }
 
-function buildFilterPickers(quadrantKey) {
-    const filtersEl = document.getElementById('schedule-filters');
-    const lineSelect = document.getElementById('schedule-line-select');
-    if (!filtersEl || !lineSelect) return;
+/**
+ * Resolve a (line, direction) pair to a real quadrant.
+ * A group label matches the whole quadrant; an individual line sets a line filter.
+ * Returns null when no quadrant carries that line in that direction (e.g. "S1/26 Clockwise").
+ */
+function resolveRouteSelection(lineValue, arrow) {
+    const quadrants = state.lastData?.quadrants ?? [];
+    let q = quadrants.find(x => x.arrow === arrow && x.label === lineValue);
+    if (q) return { quadrantKey: q.key, lineFilter: null };
+    q = quadrants.find(x => x.arrow === arrow && (x.lines ?? []).includes(lineValue));
+    if (q) return { quadrantKey: q.key, lineFilter: lineValue };
+    return null;
+}
 
-    const quadrant = quadrantKey ? state.quadrantsByKey.get(quadrantKey) : null;
+function readRouteSelection() {
+    const dirWheel = document.getElementById('schedule-wheel-direction');
+    const lineWheel = document.getElementById('schedule-wheel-line');
+    const dirIdx = dirWheel ? readWheelValue(dirWheel, scheduleDirectionOptions.length) : 0;
+    const lineIdx = lineWheel ? readWheelValue(lineWheel, scheduleLineOptions.length) : 0;
+    return {
+        arrow: scheduleDirectionOptions[dirIdx]?.arrow ?? null,
+        lineValue: scheduleLineOptions[lineIdx] ?? null,
+    };
+}
 
-    if (!quadrant) {
-        filtersEl.hidden = true;
+/** Validate current route wheels, toggle save + error, and cache the resolved selection. */
+function validateRoute() {
+    const errEl = document.getElementById('schedule-route-error');
+    const saveBtn = document.getElementById('schedule-save-btn');
+
+    if (scheduleLineOptions.length === 0 || scheduleDirectionOptions.length === 0) {
+        scheduleModalSelectedQuadrantKey = null;
+        scheduleModalLineFilter = null;
+        if (errEl) { errEl.hidden = false; errEl.textContent = 'Waiting for live data…'; }
+        if (saveBtn) saveBtn.disabled = true;
         return;
     }
 
-    lineSelect.innerHTML = '';
-    const defaultOpt = document.createElement('option');
-    defaultOpt.value = '';
-    defaultOpt.textContent = quadrant.label; // e.g. "S8/85"
-    lineSelect.appendChild(defaultOpt);
+    const { arrow, lineValue } = readRouteSelection();
+    const resolved = (arrow && lineValue) ? resolveRouteSelection(lineValue, arrow) : null;
 
-    const lines = [...(quadrant.lines ?? [])].sort();
-    for (const line of lines) {
-        const el = document.createElement('option');
-        el.value = line;
-        el.textContent = line;
-        if (line === scheduleModalLineFilter) el.selected = true;
-        lineSelect.appendChild(el);
+    if (resolved) {
+        scheduleModalSelectedQuadrantKey = resolved.quadrantKey;
+        scheduleModalLineFilter = resolved.lineFilter;
+        if (errEl) errEl.hidden = true;
+        if (saveBtn) saveBtn.disabled = false;
+    } else {
+        scheduleModalSelectedQuadrantKey = null;
+        scheduleModalLineFilter = null;
+        const dirLabel = DIRECTION_LABELS[arrow] ?? arrow ?? '';
+        if (errEl) { errEl.hidden = false; errEl.textContent = `${lineValue ?? ''} ${dirLabel} isn’t a valid route`; }
+        if (saveBtn) saveBtn.disabled = true;
     }
-
-    lineSelect.onchange = () => { scheduleModalLineFilter = lineSelect.value || null; };
-
-    filtersEl.hidden = false;
 }
 
-function buildNotifyPicker() {
-    const grid = document.getElementById('schedule-notify-grid');
-    if (!grid) return;
-    grid.innerHTML = '';
+let validateRouteRafId = null;
 
-    for (const opt of NOTIFY_OPTIONS) {
-        const btn = document.createElement('button');
-        btn.type = 'button';
-        btn.className = 'schedule-notify-btn';
-        btn.dataset.value = opt.value ?? '';
-        btn.textContent = opt.label;
-        const isSelected = opt.value === scheduleModalTriggerMinutes;
-        btn.classList.toggle('selected', isSelected);
-        btn.setAttribute('aria-pressed', String(isSelected));
+function throttledValidateRoute() {
+    if (validateRouteRafId !== null) return;
+    validateRouteRafId = requestAnimationFrame(() => {
+        validateRouteRafId = null;
+        validateRoute();
+    });
+}
 
-        btn.addEventListener('click', () => {
-            scheduleModalTriggerMinutes = opt.value;
-            grid.querySelectorAll('.schedule-notify-btn').forEach(b => {
-                const isThis = b === btn;
-                b.classList.toggle('selected', isThis);
-                b.setAttribute('aria-pressed', String(isThis));
-            });
-        });
+/** Build both route wheels, seeding selection from the schedule being edited (if any). */
+function buildRouteWheels(editing) {
+    buildRouteOptions();
+    const dirWheel = document.getElementById('schedule-wheel-direction');
+    const lineWheel = document.getElementById('schedule-wheel-line');
+    if (!dirWheel || !lineWheel) return;
 
-        grid.appendChild(btn);
+    fillWheel(dirWheel, scheduleDirectionOptions.map(o => o.label));
+    fillWheel(lineWheel, scheduleLineOptions);
+
+    let dirIdx = 0;
+    let lineIdx = 0;
+    if (editing) {
+        const di = scheduleDirectionOptions.findIndex(o => o.arrow === editing.arrow);
+        if (di !== -1) dirIdx = di;
+        const li = scheduleLineOptions.indexOf(editing.lineFilter ?? editing.label);
+        if (li !== -1) lineIdx = li;
     }
+
+    dirWheel.onscroll = throttledValidateRoute;
+    lineWheel.onscroll = throttledValidateRoute;
+    requestAnimationFrame(() => {
+        scrollWheelTo(dirWheel, dirIdx);
+        scrollWheelTo(lineWheel, lineIdx);
+    });
+
+    validateRoute();
 }
 
 function buildDayPicker() {
@@ -1296,23 +1332,19 @@ function openScheduleModal(editId = null) {
     scheduleModalSelectedQuadrantKey = editing?.quadrantKey ?? null;
     scheduleModalSelectedDays = new Set(editing?.repeatDays ?? []);
     scheduleModalLineFilter = editing?.lineFilter ?? null;
-    scheduleModalTriggerMinutes = editing?.triggerMinutes ?? null;
 
     const title = document.getElementById('schedule-modal-title');
     if (title) title.textContent = editing ? 'Edit Reminder' : 'Schedule Reminder';
 
     const saveBtn = document.getElementById('schedule-save-btn');
-    if (saveBtn) {
-        saveBtn.textContent = editing ? 'Update' : 'Save';
-        // Enabled when editing (quadrant already set); disabled until quadrant picked for new
-        saveBtn.disabled = !scheduleModalSelectedQuadrantKey;
-    }
+    if (saveBtn) saveBtn.textContent = editing ? 'Update' : 'Save';
+    // validateRoute() (called via buildRouteWheels) sets the final disabled state.
 
     // Build wheels
     const hourWheel = document.getElementById('schedule-wheel-hour');
     const minWheel = document.getElementById('schedule-wheel-minute');
-    if (hourWheel) buildWheelItems(hourWheel, 24, 2);
-    if (minWheel) buildWheelItems(minWheel, 60, 2);
+    if (hourWheel) fillWheel(hourWheel, numberWheelLabels(24, 2));
+    if (minWheel) fillWheel(minWheel, numberWheelLabels(60, 2));
 
     const { hours, minutes } = editing
         ? { hours: Math.floor(editing.targetMinutes / 60), minutes: editing.targetMinutes % 60 }
@@ -1327,12 +1359,11 @@ function openScheduleModal(editId = null) {
         requestAnimationFrame(() => scrollWheelTo(minWheel, minutes));
     }
 
+    buildToleranceWheel(editing?.toleranceMinutes ?? SCHEDULE_CONFIG.DEFAULT_TOLERANCE_MIN);
+
     updateScheduleDateHint();
     buildDayPicker();
-    buildQuadrantPicker();
-
-    buildFilterPickers(scheduleModalSelectedQuadrantKey);
-    buildNotifyPicker();
+    buildRouteWheels(editing);
 
     const vbbWarning = document.getElementById('schedule-vbb-warning');
     if (vbbWarning) vbbWarning.hidden = !(state.lastData?.used_fallback || state.lastError);
@@ -1368,7 +1399,7 @@ function saveSchedule() {
         label: quadrantData.label,
         arrow: quadrantData.arrow,
         lineFilter: scheduleModalLineFilter,
-        triggerMinutes: scheduleModalTriggerMinutes,
+        toleranceMinutes: readToleranceMinutes(),
         activeDepartureKey: null,
     };
 
@@ -1401,42 +1432,40 @@ function departureKey(dep, nowMs) {
  * Given a schedule and its quadrant's departures, return the best departure
  * to auto-zoom, or null if none qualifies yet.
  *
- * Target time = latest acceptable train departure (e.g. 10:30).
- * Window = [target − WINDOW_MIN, target]. Returns the latest departure in the
- * window as soon as it appears in the API — zoom triggers immediately, just
- * like a manual tap. The alarm (≤ 7 min) and auto-dismiss (≤ 5 min) are
- * handled by openZoom/updateZoomDisplay as normal.
+ * Target time = the train you want (e.g. 10:03).
+ * Window = [target − tolerance, target + tolerance]. Returns the departure
+ * closest to the target as soon as it appears in the API — zoom triggers
+ * immediately, just like a manual tap. The alarm (≤ 7 min) and auto-dismiss
+ * (≤ 5 min) are handled by openZoom/updateZoomDisplay as normal.
  */
 function pickDepartureForSchedule(schedule, quadrant, nowMs) {
     const targetMs = scheduleTargetMs(schedule);
 
-    if (targetMs <= nowMs) {
+    const tolerance = schedule.toleranceMinutes ?? SCHEDULE_CONFIG.DEFAULT_TOLERANCE_MIN;
+    const earliestMs = targetMs - tolerance * 60_000;
+    const latestMs = targetMs + tolerance * 60_000;
+
+    // The whole ± window has already passed — nothing left to catch.
+    if (latestMs <= nowMs) {
         return null;
     }
 
-    const earliestMs = targetMs - SCHEDULE_CONFIG.WINDOW_MIN * 60_000;
-    let ideal = null;
+    let best = null;
 
     for (const dep of (quadrant.departures ?? [])) {
         if (schedule.lineFilter && dep.line !== schedule.lineFilter) continue;
 
         // Use raw floor time (no +59s) for window bounds — the offset is only for zoom display alignment.
         const depMs = nowMs + dep.minutes * 60_000;
-        const inWindow = depMs >= earliestMs && depMs <= targetMs;
+        if (depMs < earliestMs || depMs > latestMs) continue;
 
-        if (!inWindow) continue;
-
-        if (!ideal || depMs > ideal.depMs) {
-            ideal = { dep, depMs };
+        const dist = Math.abs(depMs - targetMs);
+        if (!best || dist < best.dist) {
+            best = { dep, dist };
         }
     }
 
-    if (!ideal) return null;
-
-    // Hold off until the train is within the configured trigger window.
-    if (schedule.triggerMinutes != null && ideal.dep.minutes > schedule.triggerMinutes) return null;
-
-    return ideal.dep;
+    return best?.dep ?? null;
 }
 
 /**

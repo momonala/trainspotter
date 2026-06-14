@@ -168,7 +168,7 @@ sequenceDiagram
   participant Flask as GET /api/display/data
   participant VBB as VBB departures
 
-  User->>Display: tap +, pick time + quadrant, Save
+  User->>Display: tap +, pick time ± tolerance + direction + line, Save
   Display->>LS: write displaySchedules[]
   Display->>Display: unlockAudio (iOS gesture)
 
@@ -183,7 +183,7 @@ sequenceDiagram
     Display->>Display: clock tick + evaluateSchedules
   end
 
-  alt ideal train appears in window [target − 10 min, target]
+  alt ideal train appears in window [target − tolerance, target + tolerance]
     Display->>Display: openZoom(dep) — same path as manual tap
     Note over Display: zoom alarm at ≤7 min handles leave-home
   end
@@ -215,18 +215,21 @@ Client-side feature in `display.js`. No server persistence — schedules live in
 
 #### User flow
 
-1. Tap **+** in the header → time picker (hour/minute scroll wheels) + four quadrant buttons.
-2. Wheels default to the current **Berlin** time. If the selected time is **≤ now**, the hint shows **Tomorrow** and save stores the next calendar day.
-3. Pick a quadrant (required before Save). A badge appears in the header (e.g. `10:33 ↓` or `10:00 ↓ · tomorrow`).
-4. Tap **×** on a badge to remove that schedule.
+1. Tap **+** in the header → scroll wheels for time (`HH : MM`), **± tolerance** (0–25 min, default 4), **direction** (Up/Down/Clockwise/…), and **line** (group label like `S1/26` or an individual line like `S25`).
+2. Time wheels default to the current **Berlin** time. If the selected time is **≤ now**, the hint shows **Tomorrow** and save stores the next calendar day.
+3. The direction + line wheels must resolve to a real quadrant. Invalid pairings (e.g. `S1/26 Clockwise`) show an inline error and disable Save. A badge appears in the header (e.g. `10:33 S25 ↓ · ±4m`).
+4. Tap **×** on a badge to remove that schedule; tap its text to edit.
 5. When the matcher fires, the zoom modal opens automatically (same alarm/countdown as a manual tap).
+
+The line wheel offers both group labels (whole quadrant) and individual lines (line filter within that quadrant). The combination is validated against the live quadrant list: a pairing is valid only if some quadrant has that direction **and** carries that line (or matches that group label).
 
 #### Spec: what the target time means
 
 | Concept | Meaning |
 |---------|---------|
-| **Target time** | Latest train **departure** you will take (e.g. 10:30). |
-| **Acceptable window** | Departures from `(target − 10 min)` through `target` — e.g. 10:20–10:30. Any train in this window is valid; the one closest to the deadline is preferred. |
+| **Target time** | The train **departure** you want (e.g. 10:03). |
+| **Tolerance (±)** | Half-width of the acceptable window, in minutes (0–25, default 4). |
+| **Acceptable window** | Departures from `(target − tolerance)` through `(target + tolerance)` — e.g. 9:59–10:07 for `10:03 ± 4`. Any train in this window is valid; the one **closest to the target** is preferred. |
 | **Leave home** | **Not** part of the scheduler. Handled by the zoom modal alarm at ≤ 7 min before departure. |
 
 #### Spec: schedule object (`localStorage`)
@@ -242,6 +245,8 @@ Each entry in `displaySchedules`:
   "quadrantKey": "s1_26_down",
   "label": "S1/26",
   "arrow": "↓",
+  "lineFilter": "S25",
+  "toleranceMinutes": 4,
   "activeDepartureKey": null
 }
 ```
@@ -251,28 +256,31 @@ Each entry in `displaySchedules`:
 | `targetMinutes` | Minutes from Berlin midnight, 0–1439 (e.g. 633 = 10:33). |
 | `targetDate` | Berlin calendar day `YYYY-MM-DD` for one-time schedules. `null` for repeating schedules (date is computed dynamically from `repeatDays`). Set to tomorrow when `targetMinutes ≤ now` at save time. |
 | `repeatDays` | JS day-of-week values (0=Sun … 6=Sat) on which the reminder repeats. Empty array = one-time. When non-empty, `targetDate` is `null` and the next matching calendar day is computed each evaluation. |
-| `quadrantKey` | Matches `quadrants[].key` from `/api/display/data` (from `config.json` `display.quadrants`). |
+| `quadrantKey` | Matches `quadrants[].key` from `/api/display/data` (from `config.json` `display.quadrants`). Resolved from the direction + line wheels. |
+| `label` / `arrow` | Group label and direction arrow of the resolved quadrant (for the badge). |
+| `lineFilter` | Single line within the quadrant (e.g. `"S25"`), or `null` to match the whole group. |
+| `toleranceMinutes` | ± window half-width in minutes (0–25). |
 | `activeDepartureKey` | Runtime fingerprint `"{line}:{departureMsTimestamp}"` of the auto-selected departure; keyed on absolute departure time so the same physical train is stable across API refreshes. Cleared when no match. |
 
-Legacy schedules without `targetDate` default to today on load. Legacy schedules without `repeatDays` default to `[]` (one-time) on load.
+Legacy schedules without `targetDate` default to today on load, without `repeatDays` default to `[]` (one-time), and without `toleranceMinutes` default to `4`.
 
 #### Spec: selection algorithm (`pickDepartureForSchedule`)
 
 Evaluated on every successful poll **and** every 1 s clock tick.
 
-1. **Target instant** — `targetDate` + `targetMinutes` in Europe/Berlin. Skip if target is in the past.
-2. **Window** — `earliestMs = targetMs − 10 min`, `latestMs = targetMs`.
+1. **Target instant** — `targetDate` + `targetMinutes` in Europe/Berlin.
+2. **Window** — `earliestMs = targetMs − tolerance`, `latestMs = targetMs + tolerance`. Skip the schedule once the whole window is in the past (`latestMs ≤ now`).
 3. **Candidates** — departures in the scheduled quadrant where:
+   - `dep.line === lineFilter` when a line filter is set
    - `depMs = now + dep.minutes×60s` (raw floor minutes — the +59s offset is only for zoom display alignment, not window matching)
-   - `depMs > now` (has not left)
    - `earliestMs ≤ depMs ≤ latestMs`
-4. **Ideal train** — latest `depMs` among candidates (the train closest to your deadline).
+4. **Ideal train** — the candidate with the smallest `|depMs − targetMs|` (the train closest to the target).
 5. **Trigger** — auto-zoom as soon as the ideal train appears in the window (no minimum-minutes-away gate). Alarm (≤ 7 min) and auto-dismiss (≤ 5 min) behave identically to a manual tap.
-6. **Upgrade** — if a later ideal train appears while one is already selected, a single ding (sine bell tone, distinct from the main alarm) plays and the zoom switches to the new train.
+6. **Upgrade** — if a closer ideal train appears while one is already selected, a single ding (sine bell tone, distinct from the main alarm) plays and the zoom switches to the new train.
 
-**Example (target 10:30):** when a train departing 10:20–10:30 first appears in the API (could be 10–15 min ahead of the window opening), the zoom opens immediately. The alarm at ≤ 7 min then fires to tell you to leave home.
+**Example (target 10:03 ± 4):** when a train departing 9:59–10:07 first appears in the API, the zoom opens immediately for the one nearest 10:03. The alarm at ≤ 7 min then fires to tell you to leave home.
 
-**Tomorrow example (11 pm → 10:00 next day):** save stores `targetDate` = tomorrow. Matcher ignores tonight's departures because their `depMs` is before `earliestMs` on the target day. Fires when a train in `[09:50, 10:00]` first appears next morning.
+**Tomorrow example (11 pm → 10:00 ± 4 next day):** save stores `targetDate` = tomorrow. Matcher ignores tonight's departures because their `depMs` is before `earliestMs` on the target day. Fires when a train in `[09:56, 10:04]` first appears next morning.
 
 #### Boundaries and limits
 
@@ -294,9 +302,9 @@ flowchart TD
 
   subgraph matcher [pickDepartureForSchedule]
     Target["targetMs from targetDate + targetMinutes"]
-    Window["window: target−10min … target"]
-    Filter["filter quadrant departures in window"]
-    Latest["pick latest depMs (closest to deadline)"]
+    Window["window: target ± tolerance"]
+    Filter["filter quadrant departures (+ lineFilter) in window"]
+    Latest["pick depMs closest to target"]
     Trigger{"key changed since last eval?"}
   end
 

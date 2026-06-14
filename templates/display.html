@@ -84,44 +84,54 @@
         <div class="modal-card modal-card--schedule" id="schedule-modal-card">
             <h2 class="schedule-modal-title" id="schedule-modal-title">Schedule Reminder</h2>
 
-            <!-- Time picker — two scroll-snap wheels -->
-            <div class="schedule-time-picker">
-                <div class="schedule-wheel-wrap">
-                    <div class="schedule-wheel" id="schedule-wheel-hour" role="listbox" aria-label="Hour"></div>
+            <!-- Departure time — hour : minute ± tolerance scroll wheels -->
+            <section class="schedule-section">
+                <p class="schedule-section-label">Departure</p>
+                <div class="schedule-time-picker">
+                    <div class="schedule-wheel-wrap">
+                        <div class="schedule-wheel" id="schedule-wheel-hour" role="listbox" aria-label="Hour"></div>
+                    </div>
+                    <span class="schedule-time-colon" aria-hidden="true">:</span>
+                    <div class="schedule-wheel-wrap">
+                        <div class="schedule-wheel" id="schedule-wheel-minute" role="listbox" aria-label="Minute"></div>
+                    </div>
+                    <span class="schedule-time-colon schedule-time-plusminus" aria-hidden="true">±</span>
+                    <div class="schedule-wheel-wrap schedule-wheel-wrap--narrow">
+                        <div class="schedule-wheel" id="schedule-wheel-tolerance" role="listbox"
+                             aria-label="Tolerance in minutes"></div>
+                    </div>
+                    <span class="schedule-tolerance-unit" aria-hidden="true">min</span>
                 </div>
-                <span class="schedule-time-colon" aria-hidden="true">:</span>
-                <div class="schedule-wheel-wrap">
-                    <div class="schedule-wheel" id="schedule-wheel-minute" role="listbox" aria-label="Minute"></div>
-                </div>
-            </div>
-
-            <p class="schedule-date-hint" id="schedule-date-hint" aria-live="polite"></p>
+                <p class="schedule-date-hint" id="schedule-date-hint" aria-live="polite"></p>
+            </section>
 
             <!-- Repeat day picker — populated by JS -->
-            <div class="schedule-repeat-section">
+            <section class="schedule-section">
                 <p class="schedule-section-label">Repeat</p>
                 <div class="schedule-day-grid" id="schedule-day-grid"
                      role="group" aria-label="Repeat on days of week"></div>
-            </div>
+            </section>
 
-            <!-- Quadrant picker — 4 buttons populated by JS from live data -->
-            <div class="schedule-quadrant-grid" id="schedule-quadrant-grid"
-                 role="group" aria-label="Direction"></div>
-
-            <!-- Line filter — shown after quadrant is selected -->
-            <div class="schedule-filters" id="schedule-filters" hidden>
-                <div class="schedule-filter-row">
-                    <label class="schedule-section-label" for="schedule-line-select">Specify Line</label>
-                    <select id="schedule-line-select" class="schedule-select"></select>
+            <!-- Route picker — direction + line scroll wheels populated by JS from live data -->
+            <section class="schedule-section">
+                <div class="schedule-route-picker">
+                    <div class="schedule-route-wheel">
+                        <p class="schedule-section-label">Direction</p>
+                        <div class="schedule-wheel-wrap schedule-wheel-wrap--wide">
+                            <div class="schedule-wheel" id="schedule-wheel-direction" role="listbox"
+                                 aria-label="Direction"></div>
+                        </div>
+                    </div>
+                    <div class="schedule-route-wheel">
+                        <p class="schedule-section-label">Line</p>
+                        <div class="schedule-wheel-wrap schedule-wheel-wrap--wide">
+                            <div class="schedule-wheel" id="schedule-wheel-line" role="listbox"
+                                 aria-label="Line"></div>
+                        </div>
+                    </div>
                 </div>
-            </div>
-
-            <!-- Notify threshold — when should zoom open relative to departure -->
-            <div class="schedule-notify-section">
-                <p class="schedule-section-label">Open when</p>
-                <div class="schedule-notify-grid" id="schedule-notify-grid"
-                     role="group" aria-label="Notification timing"></div>
-            </div>
+                <p class="schedule-route-error" id="schedule-route-error" role="alert" hidden></p>
+            </section>
 
             <p class="modal-vbb-warning" id="schedule-vbb-warning" hidden aria-live="polite">
                 ⚠ VBB API is down — predicted times may be inaccurate. Please double-check departure times.

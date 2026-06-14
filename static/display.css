@@ -653,8 +653,9 @@ body::before {
 }
 
 .modal-card--schedule {
-    gap: 28px;
-    padding: 40px 52px 36px;
+    --schedule-wheel-item-height: 60px;
+    gap: 22px;
+    padding: 36px 52px 32px;
     background: rgba(14, 14, 26, 0.88);
     border-radius: 32px;
     backdrop-filter: blur(32px);
@@ -671,7 +672,16 @@ body::before {
     font-weight: 600;
     color: var(--d-text);
     letter-spacing: -0.3px;
-    margin: 0;
+    margin: 0 0 2px;
+}
+
+/* Each input group: an uppercase label sitting above its control. */
+.schedule-section {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
 }
 
 .modal-card--diagnostics {
@@ -725,29 +735,42 @@ body::before {
     min-width: 120px;
 }
 
-/* Time picker row */
+/* Time picker row — HH : MM tightly grouped, then a separated ± N min group */
 .schedule-time-picker {
-    --schedule-wheel-item-height: 60px;
     display: flex;
     align-items: center;
-    gap: 4px;
+    gap: 2px;
 }
 
+/* Glyphs centre-align on the wheel selection band (the row's vertical centre). */
 .schedule-time-colon {
-    font-size: 36px;
+    font-size: 34px;
     font-weight: 300;
-    color: var(--d-text-secondary);
+    color: var(--d-text-tertiary);
     line-height: 1;
-    padding-bottom: 4px;
 }
 
+.schedule-time-plusminus {
+    font-size: 28px;
+    color: var(--d-text-secondary);
+    margin-left: 14px;
+}
+
+.schedule-tolerance-unit {
+    font-size: 15px;
+    font-weight: 400;
+    color: var(--d-text-tertiary);
+    margin-left: 2px;
+}
+
+/* Caption tucked just under the wheels (which carry their own mask whitespace). */
 .schedule-date-hint {
     font-size: 13px;
     font-weight: 500;
     color: var(--d-text-secondary);
     letter-spacing: 0.3px;
-    margin: -12px 0 0;
-    min-height: 18px;
+    margin: -8px 0 0;
+    min-height: 16px;
     text-align: center;
 }
 
@@ -757,6 +780,7 @@ body::before {
     width: 80px;
     height: 180px;
     overflow: hidden;
+    /* item height (60px) × 3 visible rows; mask fades the off-centre rows */
     /* Gradient fade at top and bottom to hint that more items exist */
     -webkit-mask-image: linear-gradient(to bottom,
         transparent 0%, black 22%, black 78%, transparent 100%);
@@ -764,17 +788,17 @@ body::before {
         transparent 0%, black 22%, black 78%, transparent 100%);
 }
 
-/* The thin horizontal bar highlighting the selected item */
+/* Rounded selection band highlighting the centred item (iOS picker style) */
 .schedule-wheel-wrap::after {
     content: '';
     position: absolute;
     top: 50%;
-    left: 0;
-    right: 0;
+    left: 4px;
+    right: 4px;
     height: var(--schedule-wheel-item-height);
     transform: translateY(-50%);
-    border-top: 1px solid rgba(255, 255, 255, 0.18);
-    border-bottom: 1px solid rgba(255, 255, 255, 0.18);
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 10px;
     pointer-events: none;
     z-index: 1;
 }
@@ -804,73 +828,49 @@ body::before {
     cursor: pointer;
     user-select: none;
     -webkit-user-select: none;
+    white-space: nowrap;
     transition: opacity 0.1s ease;
 }
 
-/* Quadrant picker */
-.schedule-quadrant-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 10px;
+/* Narrow wheel — the ± tolerance number */
+.schedule-wheel-wrap--narrow { width: 56px; }
+
+/* Wide wheels — direction / line words like "Clockwise" or "S1/26" */
+.schedule-wheel-wrap--wide { width: 150px; }
+.schedule-wheel-wrap--wide .schedule-wheel-item {
+    font-size: 22px;
+    font-weight: 400;
+    font-variant-numeric: normal;
+}
+
+/* Route picker — direction + line wheels side by side */
+.schedule-route-picker {
+    display: flex;
+    justify-content: center;
+    gap: 20px;
     width: 100%;
 }
 
-.schedule-quadrant-btn {
+.schedule-route-wheel {
     display: flex;
     flex-direction: column;
     align-items: center;
-    justify-content: center;
-    gap: 4px;
-    padding: 14px 10px;
-    background: var(--d-glass-bg);
-    border: 1px solid var(--d-glass-border);
-    border-radius: 16px;
-    color: var(--d-text-secondary);
-    cursor: pointer;
-    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
-    -webkit-tap-highlight-color: transparent;
-    min-height: 72px;
+    gap: 10px;
 }
 
-.schedule-quadrant-btn:hover {
-    background: rgba(255, 255, 255, 0.10);
-    color: var(--d-text);
-}
-
-.schedule-quadrant-btn:active {
-    transform: scale(0.96);
-}
-
-.schedule-quadrant-btn.selected {
-    background: rgba(100, 180, 255, 0.15);
-    border-color: rgba(100, 180, 255, 0.45);
-    color: rgba(100, 200, 255, 0.95);
-}
-
-.schedule-quadrant-btn__arrow {
-    font-size: 28px;
-    font-weight: 700;
-    line-height: 1;
-    font-family: 'SF Pro Display', -apple-system, sans-serif;
-}
-
-.schedule-quadrant-btn__label {
-    font-size: 11px;
+.schedule-route-error {
+    font-size: 13px;
     font-weight: 500;
-    letter-spacing: 0.4px;
-    text-transform: uppercase;
-    opacity: 0.8;
+    color: var(--d-error-color);
+    letter-spacing: 0.2px;
+    text-align: center;
+    margin: -8px 0 0;
+    min-height: 16px;
 }
+
+.schedule-route-error[hidden] { display: none; }
 
 /* ── Repeat day picker ────────────────────────────────────── */
-
-.schedule-repeat-section {
-    width: 100%;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 8px;
-}
 
 .schedule-section-label {
     font-size: 11px;
@@ -911,87 +911,6 @@ body::before {
     border-color: rgba(100, 180, 255, 0.60);
     color: rgba(100, 200, 255, 1.0);
     font-weight: 600;
-}
-
-/* ── Notify-when picker ──────────────────────────────────── */
-
-.schedule-notify-section {
-    width: 100%;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 8px;
-}
-
-.schedule-notify-grid {
-    display: flex;
-    gap: 6px;
-    justify-content: center;
-}
-
-.schedule-notify-btn {
-    height: 38px;
-    padding: 0 12px;
-    border-radius: 19px;
-    border: 1px solid var(--d-glass-border);
-    background: var(--d-glass-bg);
-    color: var(--d-text-secondary);
-    font-size: 12px;
-    font-weight: 500;
-    cursor: pointer;
-    transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
-    -webkit-tap-highlight-color: transparent;
-}
-
-.schedule-notify-btn:hover {
-    background: rgba(255, 255, 255, 0.10);
-    color: var(--d-text);
-}
-
-.schedule-notify-btn.selected {
-    background: rgba(100, 180, 255, 0.20);
-    border-color: rgba(100, 180, 255, 0.60);
-    color: rgba(100, 200, 255, 1.0);
-    font-weight: 600;
-}
-
-/* ── Line / provenance filters ───────────────────────────── */
-
-.schedule-filters {
-    width: 100%;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-}
-
-.schedule-filter-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-}
-
-.schedule-filter-row .schedule-section-label {
-    flex-shrink: 0;
-    min-width: 68px;
-}
-
-.schedule-select {
-    flex: 1;
-    background: var(--d-glass-bg);
-    border: 1px solid var(--d-glass-border);
-    border-radius: 10px;
-    color: var(--d-text-primary);
-    font-size: 14px;
-    padding: 8px 12px;
-    appearance: none;
-    -webkit-appearance: none;
-    cursor: pointer;
-    outline: none;
-}
-
-.schedule-select:focus {
-    border-color: rgba(100, 180, 255, 0.60);
 }
 
 /* Action buttons */
