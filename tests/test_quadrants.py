@@ -92,6 +92,14 @@ def test_filter_and_group_caps_at_max_per_quadrant(now):
     assert len(result[0].departures) == 2
 
 
+def test_filter_and_group_keeps_all_departures_by_default(now):
+    deps = [_make_departure("S1", minutes_until=10 + i) for i in range(8)]
+    with pytest.MonkeyPatch().context() as mp:
+        mp.setattr("src.quadrants.compute_direction", lambda _: "↑")
+        result = filter_and_group(deps, now, QUADRANTS_CONFIG, min_minutes=5)
+    assert len(result[0].departures) == 8
+
+
 def test_filter_and_group_sorts_by_soonest(now):
     deps = [
         _make_departure("S1", minutes_until=20),

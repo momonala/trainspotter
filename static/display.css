@@ -291,7 +291,15 @@ body::before {
     gap: 8px;
     padding-top: 4px;
     min-height: 0;
+    /* Show 3 badges; swipe horizontally for the rest. Vertical stays clipped. */
+    overflow-x: auto;
+    overflow-y: hidden;
+    scroll-snap-type: x proximity;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
 }
+
+.departures-row::-webkit-scrollbar { display: none; }
 
 /* ── Individual departure badge ───────────────────────────── */
 
@@ -310,9 +318,12 @@ body::before {
     -webkit-backdrop-filter: blur(12px);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.10),
                 0 4px 24px rgba(0, 0, 0, 0.35);
-    flex: 1 1 auto;
-    min-width: 80px;
+    /* Basis = one third of the visible row so exactly 3 fit; ≤3 grow to fill,
+       4+ overflow into the horizontal scroll. */
+    flex: 1 0 calc((100% - 16px) / 3);
+    min-width: 0;
     max-width: 200px;
+    scroll-snap-align: start;
     cursor: pointer;
     /* 3D flip-in — origin just above centre so the card "falls" into place */
     transform-origin: center 40%;

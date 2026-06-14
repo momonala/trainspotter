@@ -288,7 +288,7 @@ Evaluated on every successful poll **and** every 1 s clock tick.
 |-------|-----------|
 | **Persistence** | Browser `localStorage` only; cleared with site data; not synced across devices. |
 | **Horizon** | Practical limit ~24 h (tomorrow rollover). No multi-day scheduling. |
-| **API visibility** | Only departures returned by VBB and kept by `max_per_quadrant` (3) are matchable. |
+| **API visibility** | Every departure returned by VBB within the fetch window is matchable. The display shows 3 per quadrant and reveals the rest via horizontal scroll. |
 | **Multiple schedules** | Each evaluated independently; one zoom modal — first match wins unless upgrading the same schedule. |
 | **Walk time** | Exposed as `walk_time` on `/api/display/data` for dashboard parity; **not** used by the scheduler. |
 

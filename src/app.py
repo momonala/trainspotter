@@ -47,7 +47,6 @@ logging.getLogger("werkzeug").setLevel(logging.WARNING)
 browser_coordinates = None
 cached_stations = None
 COORDINATE_ACCURACY_DECIMALS = 3
-DISPLAY_MAX_PER_QUADRANT = 3
 
 
 def _station_board_row(station: Station, user_coords: tuple[float, float] | None) -> dict:
@@ -203,12 +202,13 @@ def api_display_data():
                 ),
                 502,
             )
+        # No cap: return every matching departure. The display shows 3 per quadrant
+        # and reveals the rest via horizontal scroll (see .departures-row in display.css).
         quadrants_data = filter_and_group(
             departures,
             now,
             quadrants_config=display_config["quadrants"],
             min_minutes=config["min_departure_time_min"],
-            max_per_quadrant=DISPLAY_MAX_PER_QUADRANT,
         )
 
         walk_time = get_configured_walk_time(display_config["station_name"])

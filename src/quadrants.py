@@ -41,7 +41,7 @@ def filter_and_group(
     now: datetime,
     quadrants_config: list[dict],
     min_minutes: int = 5,
-    max_per_quadrant: int = 2,
+    max_per_quadrant: int | None = None,
 ) -> list[QuadrantData]:
     """Filter departures by min_minutes and group into quadrants per config.
 
@@ -51,6 +51,7 @@ def filter_and_group(
         quadrants_config: List of quadrant dicts from config.json (key, label, lines, direction).
         min_minutes: Departures with fewer remaining minutes are excluded.
         max_per_quadrant: Maximum departures kept per quadrant (sorted by soonest first).
+            None keeps every matching departure.
 
     Returns:
         One QuadrantData per config entry, in the same order as quadrants_config.
@@ -75,7 +76,8 @@ def filter_and_group(
                 break
 
     for key in groups:
-        groups[key] = sorted(groups[key], key=lambda s: s.minutes)[:max_per_quadrant]
+        ordered = sorted(groups[key], key=lambda s: s.minutes)
+        groups[key] = ordered[:max_per_quadrant] if max_per_quadrant is not None else ordered
 
     return [
         QuadrantData(key=q["key"], label=q["label"], arrow=q["direction"], departures=groups[q["key"]])
