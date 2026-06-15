@@ -374,20 +374,6 @@ function beepOnce() {
     });
 }
 
-function dingOnce() {
-    if (muted || !audioCtx || audioCtx.state !== 'running') return;
-    const osc = audioCtx.createOscillator();
-    const gain = audioCtx.createGain();
-    osc.connect(gain);
-    gain.connect(audioCtx.destination);
-    osc.type = 'sine';
-    osc.frequency.value = 1046;  // C6 — bright bell tone
-    gain.gain.setValueAtTime(0.4, audioCtx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.8);
-    osc.start(audioCtx.currentTime);
-    osc.stop(audioCtx.currentTime + 0.8);
-}
-
 function playAlarm() {
     stopAlarm();
     beepOnce();
@@ -863,6 +849,12 @@ window.addEventListener('DOMContentLoaded', () => {
     // Schedule modal cancel / save
     document.getElementById('schedule-cancel-btn')?.addEventListener('click', closeScheduleModal);
     document.getElementById('schedule-save-btn')?.addEventListener('click', saveSchedule);
+
+    // Switch-offer dismiss — suppress this train so it isn't re-offered next tick
+    document.getElementById('switch-offer-dismiss')?.addEventListener('click', () => {
+        if (switchOffer) dismissedOfferKeys.add(switchOffer.key);
+        hideSwitchOffer();
+    });
 
     // Initial schedule badge render from localStorage
     renderScheduleBadges();
@@ -1423,54 +1415,57 @@ function saveSchedule() {
 // Scheduler — matcher & auto-zoom
 // =============================================================================
 
-/** Stable fingerprint for a departure — used to detect a new/changed selection. */
-function departureKey(dep, nowMs) {
-    return `${dep.line}:${departureMsFromFloorMinutes(dep, nowMs)}`;
+/**
+ * Stable fingerprint for a departure, invariant across per-minute aging.
+ *
+ * state.quadrantsByKey is rebuilt from aged data so dep.minutes decrements each
+ * minute; adding elapsedMin recovers the original fetch-relative minutes, giving
+ * a constant key for the same physical train between API fetches.
+ */
+function stableDepartureKey(dep, nowMs) {
+    const elapsedMin = state.lastUpdatedAt != null
+        ? Math.floor((nowMs - state.lastUpdatedAt) / 60_000)
+        : 0;
+    const stableMs = (state.lastUpdatedAt ?? nowMs) + (dep.minutes + elapsedMin) * 60_000 + FLOOR_MINUTES_OFFSET_MS;
+    return `${dep.line}:${stableMs}`;
 }
 
 /**
- * Given a schedule and its quadrant's departures, return the best departure
- * to auto-zoom, or null if none qualifies yet.
+ * Departures in the scheduled quadrant that fall inside the ± window, sorted by
+ * closeness to the target (closest first). Empty once the whole window is past.
  *
  * Target time = the train you want (e.g. 10:03).
- * Window = [target − tolerance, target + tolerance]. Returns the departure
- * closest to the target as soon as it appears in the API — zoom triggers
- * immediately, just like a manual tap. The alarm (≤ 7 min) and auto-dismiss
- * (≤ 5 min) are handled by openZoom/updateZoomDisplay as normal.
+ * Window = [target − tolerance, target + tolerance].
  */
-function pickDepartureForSchedule(schedule, quadrant, nowMs) {
+function candidatesForSchedule(schedule, quadrant, nowMs) {
     const targetMs = scheduleTargetMs(schedule);
-
     const tolerance = schedule.toleranceMinutes ?? SCHEDULE_CONFIG.DEFAULT_TOLERANCE_MIN;
     const earliestMs = targetMs - tolerance * 60_000;
     const latestMs = targetMs + tolerance * 60_000;
 
     // The whole ± window has already passed — nothing left to catch.
-    if (latestMs <= nowMs) {
-        return null;
-    }
+    if (latestMs <= nowMs) return [];
 
-    let best = null;
-
+    const out = [];
     for (const dep of (quadrant.departures ?? [])) {
         if (schedule.lineFilter && dep.line !== schedule.lineFilter) continue;
-
         // Use raw floor time (no +59s) for window bounds — the offset is only for zoom display alignment.
         const depMs = nowMs + dep.minutes * 60_000;
         if (depMs < earliestMs || depMs > latestMs) continue;
-
-        const dist = Math.abs(depMs - targetMs);
-        if (!best || dist < best.dist) {
-            best = { dep, dist };
-        }
+        out.push({ dep, dist: Math.abs(depMs - targetMs) });
     }
-
-    return best?.dep ?? null;
+    out.sort((a, b) => a.dist - b.dist);
+    return out.map(c => c.dep);
 }
 
 /**
  * Evaluate all active schedules against current departure data.
  * Called after each successful API refresh and on every clock tick.
+ *
+ * Behaviour: lock onto the first qualifying train (the one closest to target at
+ * first match) and never switch automatically. If a closer train later appears
+ * while one is locked, surface a non-blocking "switch" offer instead — the user
+ * decides. The locked train is only replaced when it leaves the window (departs).
  */
 function evaluateSchedules() {
     if (!state.lastData || schedules.length === 0) return;
@@ -1487,47 +1482,91 @@ function evaluateSchedules() {
             continue;
         }
 
-        const pick = pickDepartureForSchedule(schedule, quadrant, nowMs);
+        const candidates = candidatesForSchedule(schedule, quadrant, nowMs);
 
-        if (!pick) {
+        if (candidates.length === 0) {
             schedule.activeDepartureKey = null;
+            dismissSwitchOffer(schedule.id);
             continue;
         }
 
-        // Recover original (unaged) departure time to keep the key stable across
-        // per-minute aging. state.quadrantsByKey is rebuilt from aged data so
-        // pick.minutes decrements each minute; adding elapsedMin gives the
-        // original fetch-relative minutes, producing a constant key between fetches.
-        const elapsedMin = state.lastUpdatedAt != null
-            ? Math.floor((nowMs - state.lastUpdatedAt) / 60_000)
-            : 0;
-        const stableMs = (state.lastUpdatedAt ?? nowMs) + (pick.minutes + elapsedMin) * 60_000 + FLOOR_MINUTES_OFFSET_MS;
-        const newKey = `${pick.line}:${stableMs}`;
-        const prevKey = schedule.activeDepartureKey;
+        const ideal = candidates[0];  // closest to target
+        const idealKey = stableDepartureKey(ideal, nowMs);
 
-        if (newKey === prevKey) {
+        // Is the locked train still in the window?
+        const locked = schedule.activeDepartureKey
+            ? candidates.find(d => stableDepartureKey(d, nowMs) === schedule.activeDepartureKey)
+            : null;
+
+        // Nothing locked yet (first match, or the locked train has departed) →
+        // lock onto the closest train and zoom, exactly like a manual tap.
+        if (!locked) {
+            // Manual zoom open: don't steal it. Leave the key unset so we lock once it closes.
+            if (zoom.active) continue;
+            schedule.activeDepartureKey = idealKey;
+            dismissSwitchOffer(schedule.id);
+            console.info(`[evaluateSchedules] auto-zoom for "${formatScheduleLabel(schedule)}" → ${idealKey}`);
+            openZoom(ideal, schedule.arrow);
             continue;
         }
 
-        const isUpgrade = prevKey !== null;  // switching from one dep to a better one
-
-        // Guard before updating key: if zoom is already open from a manual tap and this is a
-        // first-time match (not an upgrade), skip without consuming the key so the alarm can
-        // still fire once the manual zoom closes.
-        if (zoom.active && !isUpgrade) {
-            continue;
+        // A train is locked. Never switch automatically — if a closer one exists, offer it.
+        if (idealKey !== schedule.activeDepartureKey) {
+            showSwitchOffer(schedule, ideal, idealKey);
+        } else {
+            dismissSwitchOffer(schedule.id);
         }
-
-        schedule.activeDepartureKey = newKey;
-
-        console.info(`[evaluateSchedules] auto-zoom for schedule "${formatScheduleLabel(schedule)}" → ${newKey} (upgrade: ${isUpgrade})`);
-
-        if (isUpgrade) {
-            // Skip ding if openZoom will immediately fire the main alarm anyway
-            if (pick.minutes > 7) dingOnce();
-            closeZoom();
-        }
-
-        openZoom(pick, schedule.arrow);
     }
+}
+
+// =============================================================================
+// Scheduler — switch offer (non-blocking)
+// =============================================================================
+
+let switchOffer = null;                // { scheduleId, key } currently shown, or null
+const dismissedOfferKeys = new Set();  // offered trains the user dismissed — don't re-offer
+
+/**
+ * Show a small non-blocking toast offering a closer train. Re-callable each tick:
+ * keeps the captured departure fresh without re-running the entry animation
+ * (setting hidden=false when already visible is a no-op for display).
+ */
+function showSwitchOffer(schedule, dep, key) {
+    if (dismissedOfferKeys.has(key)) return;
+    const offer = document.getElementById('switch-offer');
+    if (!offer) return;
+
+    switchOffer = { scheduleId: schedule.id, key };
+
+    const timeStr = new Date(departureMsFromFloorMinutes(dep)).toLocaleTimeString('de-DE', {
+        hour: '2-digit', minute: '2-digit',
+    });
+    const labelEl = document.getElementById('switch-offer-label');
+    if (labelEl) labelEl.textContent = `${dep.line} · ${timeStr}`;
+
+    const acceptBtn = document.getElementById('switch-offer-accept');
+    if (acceptBtn) acceptBtn.onclick = () => acceptSwitchOffer(schedule.id, dep, key);
+
+    offer.hidden = false;
+}
+
+/** Accept the offered train: lock it and zoom (the tap is the audio-unlock gesture). */
+function acceptSwitchOffer(scheduleId, dep, key) {
+    const schedule = schedules.find(s => s.id === scheduleId);
+    if (schedule) schedule.activeDepartureKey = key;
+    hideSwitchOffer();
+    openZoom(dep, schedule?.arrow);
+}
+
+function hideSwitchOffer() {
+    switchOffer = null;
+    const offer = document.getElementById('switch-offer');
+    if (offer) offer.hidden = true;
+}
+
+/** Hide the offer if it belongs to this schedule (or unconditionally when no id given). */
+function dismissSwitchOffer(scheduleId) {
+    if (!switchOffer) return;
+    if (scheduleId && switchOffer.scheduleId !== scheduleId) return;
+    hideSwitchOffer();
 }

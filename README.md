@@ -183,9 +183,9 @@ sequenceDiagram
     Display->>Display: clock tick + evaluateSchedules
   end
 
-  alt ideal train appears in window [target − tolerance, target + tolerance]
-    Display->>Display: openZoom(dep) — same path as manual tap
-    Note over Display: zoom alarm at ≤7 min handles leave-home
+  alt first train appears in window [target − tolerance, target + tolerance]
+    Display->>Display: lock + openZoom(dep) — same path as manual tap
+    Note over Display: closer train later → non-blocking switch toast, no auto-switch
   end
 ```
 
@@ -219,7 +219,7 @@ Client-side feature in `display.js`. No server persistence — schedules live in
 2. Time wheels default to the current **Berlin** time. If the selected time is **≤ now**, the hint shows **Tomorrow** and save stores the next calendar day.
 3. The direction + line wheels must resolve to a real quadrant. Invalid pairings (e.g. `S1/26 Clockwise`) show an inline error and disable Save. A badge appears in the header (e.g. `10:33 S25 ↓ · ±4m`).
 4. Tap **×** on a badge to remove that schedule; tap its text to edit.
-5. When the matcher fires, the zoom modal opens automatically (same alarm/countdown as a manual tap).
+5. When the matcher fires, the zoom modal opens automatically (same alarm/countdown as a manual tap). It **locks** onto that train and never switches on its own. If a closer train later appears, a small non-blocking toast at the bottom offers it — tap **Switch** to move to it, or **×** to dismiss.
 
 The line wheel offers both group labels (whole quadrant) and individual lines (line filter within that quadrant). The combination is validated against the live quadrant list: a pairing is valid only if some quadrant has that direction **and** carries that line (or matches that group label).
 
@@ -260,7 +260,7 @@ Each entry in `displaySchedules`:
 | `label` / `arrow` | Group label and direction arrow of the resolved quadrant (for the badge). |
 | `lineFilter` | Single line within the quadrant (e.g. `"S25"`), or `null` to match the whole group. |
 | `toleranceMinutes` | ± window half-width in minutes (0–25). |
-| `activeDepartureKey` | Runtime fingerprint `"{line}:{departureMsTimestamp}"` of the auto-selected departure; keyed on absolute departure time so the same physical train is stable across API refreshes. Cleared when no match. |
+| `activeDepartureKey` | Runtime fingerprint `"{line}:{departureMsTimestamp}"` of the **locked** departure; keyed on absolute departure time so the same physical train is stable across API refreshes. Once set it is not changed automatically — only when the locked train leaves the window, the user accepts a switch offer, or no candidate remains (cleared). |
 
 Legacy schedules without `targetDate` default to today on load, without `repeatDays` default to `[]` (one-time), and without `toleranceMinutes` default to `4`.
 
@@ -274,11 +274,13 @@ Evaluated on every successful poll **and** every 1 s clock tick.
    - `dep.line === lineFilter` when a line filter is set
    - `depMs = now + dep.minutes×60s` (raw floor minutes — the +59s offset is only for zoom display alignment, not window matching)
    - `earliestMs ≤ depMs ≤ latestMs`
-4. **Ideal train** — the candidate with the smallest `|depMs − targetMs|` (the train closest to the target).
-5. **Trigger** — auto-zoom as soon as the ideal train appears in the window (no minimum-minutes-away gate). Alarm (≤ 7 min) and auto-dismiss (≤ 5 min) behave identically to a manual tap.
-6. **Upgrade** — if a closer ideal train appears while one is already selected, a single ding (sine bell tone, distinct from the main alarm) plays and the zoom switches to the new train.
 
-**Example (target 10:03 ± 4):** when a train departing 9:59–10:07 first appears in the API, the zoom opens immediately for the one nearest 10:03. The alarm at ≤ 7 min then fires to tell you to leave home.
+   Candidates are sorted by `|depMs − targetMs|` (closest to target first).
+4. **Lock** — when no train is locked yet, lock onto the closest candidate, store its `activeDepartureKey`, and auto-zoom (no minimum-minutes-away gate). Alarm (≤ 7 min) and auto-dismiss (≤ 5 min) behave identically to a manual tap.
+5. **Hold** — once locked, the schedule keeps that train. It is replaced automatically only when the locked train leaves the window (departs), at which point the next-closest candidate is locked.
+6. **Switch offer** — if a closer train appears while one is locked, a non-blocking bottom toast offers it (no sound). **Switch** locks the offered train and zooms to it; **×** dismisses and suppresses re-offering that same train. The matcher never switches on its own.
+
+**Example (target 10:03 ± 4):** when a train departing 9:59–10:07 first appears in the API, the zoom opens immediately and locks onto the one nearest 10:03. If a closer one shows up later, the toast offers it but the locked train stays put until you tap Switch. The alarm at ≤ 7 min fires to tell you to leave home.
 
 **Tomorrow example (11 pm → 10:00 ± 4 next day):** save stores `targetDate` = tomorrow. Matcher ignores tonight's departures because their `depMs` is before `earliestMs` on the target day. Fires when a train in `[09:56, 10:04]` first appears next morning.
 
@@ -289,7 +291,7 @@ Evaluated on every successful poll **and** every 1 s clock tick.
 | **Persistence** | Browser `localStorage` only; cleared with site data; not synced across devices. |
 | **Horizon** | Practical limit ~24 h (tomorrow rollover). No multi-day scheduling. |
 | **API visibility** | Every departure returned by VBB within the fetch window is matchable. The display shows 3 per quadrant and reveals the rest via horizontal scroll. |
-| **Multiple schedules** | Each evaluated independently; one zoom modal — first match wins unless upgrading the same schedule. |
+| **Multiple schedules** | Each evaluated independently; one zoom modal and one switch-offer toast — first match wins. |
 | **Walk time** | Exposed as `walk_time` on `/api/display/data` for dashboard parity; **not** used by the scheduler. |
 
 ```mermaid
@@ -300,17 +302,17 @@ flowchart TD
     Clock["1s clock tick"]
   end
 
-  subgraph matcher [pickDepartureForSchedule]
+  subgraph matcher [evaluateSchedules]
     Target["targetMs from targetDate + targetMinutes"]
     Window["window: target ± tolerance"]
-    Filter["filter quadrant departures (+ lineFilter) in window"]
-    Latest["pick depMs closest to target"]
-    Trigger{"key changed since last eval?"}
+    Filter["candidates: quadrant departures (+ lineFilter) in window, sorted by closeness"]
+    Locked{"locked train still in window?"}
+    Closer{"closest candidate ≠ locked?"}
   end
 
   subgraph output [Output]
-    Zoom["openZoom → alarm at ≤7 min"]
-    Upgrade["ding + switch zoom (upgrade)"]
+    Zoom["lock + openZoom → alarm at ≤7 min"]
+    Offer["non-blocking switch toast (no sound)"]
     Idle["no action"]
   end
 
@@ -319,11 +321,11 @@ flowchart TD
   Clock --> Filter
   Target --> Window
   Window --> Filter
-  Filter --> Latest
-  Latest --> Trigger
-  Trigger -->|"new train, no zoom active"| Zoom
-  Trigger -->|"better train, zoom active"| Upgrade
-  Trigger -->|no change| Idle
+  Filter --> Locked
+  Locked -->|"no (first match or departed)"| Zoom
+  Locked -->|yes| Closer
+  Closer -->|yes| Offer
+  Closer -->|no| Idle
 ```
 
 ---

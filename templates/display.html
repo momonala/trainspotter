@@ -78,6 +78,15 @@
         </div>
     </div>
 
+    <!-- Switch offer — non-blocking toast when a closer train appears for a locked reminder -->
+    <div class="switch-offer" id="switch-offer" hidden role="status" aria-live="polite">
+        <span class="switch-offer-text">Closer train
+            <span class="switch-offer-label" id="switch-offer-label"></span>
+        </span>
+        <button type="button" class="switch-offer-btn" id="switch-offer-accept">Switch</button>
+        <button type="button" class="switch-offer-dismiss" id="switch-offer-dismiss" aria-label="Dismiss">×</button>
+    </div>
+
     <!-- Schedule modal — shown when + button is tapped -->
     <div class="modal-overlay schedule-overlay" id="schedule-overlay" hidden
          role="dialog" aria-modal="true" aria-labelledby="schedule-modal-title">
