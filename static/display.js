@@ -816,6 +816,9 @@ window.addEventListener('DOMContentLoaded', () => {
         if (e.target === e.currentTarget) closeZoom();
     });
 
+    // Close zoom modal on close button click
+    document.getElementById('modal-close-btn')?.addEventListener('click', closeZoom);
+
     // Close modals on Escape
     document.addEventListener('keydown', e => {
         if (e.key === 'Escape') {
