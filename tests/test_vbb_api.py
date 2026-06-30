@@ -6,6 +6,7 @@ import requests
 
 from src.datamodels import Station
 from src.vbb_api import VBBAPIError
+from src.vbb_api import _classify_request_exception
 from src.vbb_api import get_inbound_trains
 from src.vbb_api import get_nearby_stations
 
@@ -153,3 +154,35 @@ def test_get_inbound_trains_handles_errors(mock_logger, mock_get):
         get_inbound_trains(station)
 
     assert "Network error" in str(exc_info.value)
+    assert exc_info.value.kind == "unknown"
+
+
+@pytest.mark.parametrize(
+    ("exc", "expected_kind", "expected_status"),
+    [
+        (requests.HTTPError("503", response=Mock(status_code=503)), "http_503", 503),
+        (requests.HTTPError("502", response=Mock(status_code=502)), "http_502", 502),
+        (requests.ReadTimeout("read timed out"), "timeout", None),
+        (requests.ConnectionError("connection refused"), "connection", None),
+    ],
+)
+def test_classify_request_exception(exc, expected_kind, expected_status):
+    kind, http_status = _classify_request_exception(exc)
+    assert kind == expected_kind
+    assert http_status == expected_status
+
+
+def test_vbb_api_error_to_diagnostics():
+    error = VBBAPIError("VBB API error: timed out", kind="timeout")
+    assert error.to_diagnostics() == {
+        "vbb_error": "VBB API error: timed out",
+        "vbb_error_kind": "timeout",
+        "vbb_error_summary": "VBB timed out",
+    }
+
+
+def test_vbb_api_error_summary_for_http_status():
+    error = VBBAPIError("VBB API error: 503", kind="http_503", http_status=503)
+    assert error.summary == "VBB returned 503"
+    diagnostics = error.to_diagnostics()
+    assert diagnostics["vbb_http_status"] == 503

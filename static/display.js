@@ -75,29 +75,62 @@ const warnedMissingQuadrantKeys = new Set();
 // =============================================================================
 
 /**
+ * Human-readable label for a structured VBB failure in diagnostics.
+ * @param {{ vbb_error_summary?: string, vbb_error_kind?: string, vbb_http_status?: number } | null | undefined} diag
+ * @returns {{ short: string, badge: string }}
+ */
+function describeVbbUpstream(diag) {
+    const summary = diag?.vbb_error_summary;
+    if (summary) {
+        return { short: summary, badge: `⚠\u2009${summary}` };
+    }
+    const httpStatus = diag?.vbb_http_status;
+    if (httpStatus != null) {
+        const short = `VBB returned ${httpStatus}`;
+        return { short, badge: `⚠\u2009${short}` };
+    }
+    const kind = diag?.vbb_error_kind;
+    if (kind === 'timeout') {
+        return { short: 'VBB timed out', badge: '⚠\u2009VBB timed out' };
+    }
+    if (kind === 'connection') {
+        return { short: 'VBB connection failed', badge: '⚠\u2009VBB connection failed' };
+    }
+    return { short: 'VBB unreachable', badge: '⚠\u2009VBB unreachable' };
+}
+
+/**
  * Map a failed display fetch to engineering-facing copy.
- * Backend /api/display/data only returns HTTP errors as 502 or 500 (see src/app.py).
+ * Backend /api/display/data returns HTTP 502 when VBB fails with no fallback,
+ * or HTTP 500 for unexpected handler errors. The upstream VBB failure type
+ * (timeout, 502, 503, …) is in diagnostics, not the HTTP status code.
  *
  * @returns {{ title: string, subtitle: string, badge: string }}
  */
 function describeDisplayFetchError(err) {
     const status = err.httpStatus != null ? Number(err.httpStatus) : null;
+    const diag = err.serverDiagnostics ?? null;
 
     if (err.name === 'AbortError') {
         const timeoutMs = DISPLAY_CONFIG.FETCH_TIMEOUT_MS / 1000;
         return {
             title: `Client timeout (${timeoutMs}s)`,
-            subtitle: 'GET /api/display/data client timeout · VBB fetch timed out after ${timeoutMs}s',
-            badge: '⚠\u2009fetch timeout',
+            subtitle: `GET /api/display/data client timeout · browser gave up after ${timeoutMs}s`,
+            badge: '⚠\u2009client timeout',
         };
     }
 
     if (status === 502) {
-        const detail = err.serverDetail || 'No cached snapshot available';
+        const upstream = describeVbbUpstream(diag);
+        const detail = err.serverDetail || 'No cached snapshot with future departures';
+        const parts = [upstream.short, detail];
+        if (diag?.vbb_error && !parts.some(p => diag.vbb_error.includes(p))) {
+            parts.push(diag.vbb_error);
+        }
         return {
-            title: '502 · VBB unreachable · No cached snapshot available',
-            subtitle: [err.serverError, detail].filter(Boolean).join(' — '),
-            badge: '⚠\u2009502 · VBB down',
+            title: `No departures · ${upstream.short}`,
+            subtitle: parts.join(' · '),
+            badge: upstream.badge,
         };
     }
 
@@ -264,7 +297,8 @@ function getStatusBadgeText(status) {
     }
     // Status is 'stale' only when used_fallback is true
     if (state.lastData?.used_fallback) {
-        return '⚠ stale snapshot · VBB unreachable';
+        const upstream = describeVbbUpstream(state.lastData.diagnostics);
+        return `⚠\u2009stale snapshot · ${upstream.short}`;
     }
     return null;
 }
@@ -427,11 +461,22 @@ function updateZoomDisplay() {
     syncVbbWarning();
 }
 
+function vbbWarningMessage(diag) {
+    const upstream = describeVbbUpstream(diag);
+    return `⚠ ${upstream.short} — predicted times may be inaccurate. Please double-check departure times.`;
+}
+
 function syncVbbWarning() {
-    const el = document.getElementById('modal-vbb-warning');
-    if (!el) return;
+    const modalEl = document.getElementById('modal-vbb-warning');
+    const scheduleEl = document.getElementById('schedule-vbb-warning');
     const vbbDown = !!(state.lastData?.used_fallback || state.lastError);
-    el.hidden = !vbbDown;
+    const diag = state.lastError?.err?.serverDiagnostics ?? state.lastData?.diagnostics;
+    const message = vbbDown ? vbbWarningMessage(diag) : '';
+    for (const el of [modalEl, scheduleEl]) {
+        if (!el) continue;
+        el.hidden = !vbbDown;
+        if (vbbDown) el.textContent = message;
+    }
 }
 
 /** Floor-minute departures need +59s so Math.floor matches the badge on open. */
@@ -690,15 +735,19 @@ function buildDiagnosticLines() {
             lines.push(['Last failure', new Date(fetchError.at).toLocaleString('de-DE', { timeZone: BERLIN_TZ })]);
         }
     } else if (state.lastData?.used_fallback) {
+        const upstream = describeVbbUpstream(state.lastData.diagnostics);
         lines.push(['Issue', 'Serving stale snapshot']);
-        lines.push(['Summary', 'VBB unreachable — departures time-shifted from last successful fetch']);
+        lines.push(['Summary', `${upstream.short} — departures time-shifted from last successful fetch`]);
     } else {
         lines.push(['Issue', 'No active fetch error']);
     }
 
     if (diag) {
         if (diag.station_id) lines.push(['Station ID', diag.station_id]);
-        if (diag.vbb_error) lines.push(['VBB error', diag.vbb_error]);
+        if (diag.vbb_error_summary) lines.push(['VBB failure', diag.vbb_error_summary]);
+        if (diag.vbb_error_kind) lines.push(['VBB error kind', diag.vbb_error_kind]);
+        if (diag.vbb_http_status != null) lines.push(['VBB HTTP status', String(diag.vbb_http_status)]);
+        if (diag.vbb_error) lines.push(['VBB error detail', diag.vbb_error]);
         if (diag.snapshot) {
             lines.push(['Snapshot age', diag.snapshot.snapshot_age ?? '—']);
             lines.push(['Snapshot captured', diag.snapshot.captured_at ?? '—']);
@@ -1360,8 +1409,7 @@ function openScheduleModal(editId = null) {
     buildDayPicker();
     buildRouteWheels(editing);
 
-    const vbbWarning = document.getElementById('schedule-vbb-warning');
-    if (vbbWarning) vbbWarning.hidden = !(state.lastData?.used_fallback || state.lastError);
+    syncVbbWarning();
 
     overlay.hidden = false;
     overlay.classList.remove('closing');

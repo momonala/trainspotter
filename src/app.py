@@ -151,7 +151,7 @@ def _fetch_display_departures(
         return fresh_departures, False, diagnostics
     except VBBAPIError as error:
         logger.debug("VBB API error: %s", error)
-        diagnostics["vbb_error"] = str(error)
+        diagnostics.update(error.to_diagnostics())
         _attach_snapshot_diagnostics(diagnostics, station_id, now)
         fallback_departures = get_fallback_departures(station_id, now)
         if fallback_departures is None:
@@ -195,7 +195,7 @@ def api_display_data():
             return make_response(
                 jsonify(
                     {
-                        "error": "VBB unreachable",
+                        "error": diagnostics.get("vbb_error_summary", "VBB unreachable"),
                         "detail": "No cached snapshot with future departures available",
                         "diagnostics": diagnostics,
                     }

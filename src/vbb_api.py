@@ -27,6 +27,83 @@ logging.getLogger("urllib3.connectionpool").setLevel(logging.ERROR)
 class VBBAPIError(Exception):
     """Raised when the VBB/downstream API fails (timeout, connection, 5xx)."""
 
+    _SUMMARIES = {
+        "timeout": "VBB timed out",
+        "connection": "VBB connection failed",
+        "http_500": "VBB returned 500",
+        "http_502": "VBB returned 502",
+        "http_503": "VBB returned 503",
+        "http_504": "VBB returned 504",
+    }
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        kind: str = "unknown",
+        http_status: int | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.kind = kind
+        self.http_status = http_status
+
+    @property
+    def summary(self) -> str:
+        """Short, user-facing description of the upstream failure."""
+        if self.kind in self._SUMMARIES:
+            return self._SUMMARIES[self.kind]
+        if self.http_status is not None:
+            return f"VBB returned {self.http_status}"
+        return "VBB unreachable"
+
+    def to_diagnostics(self) -> dict:
+        """Structured fields for API diagnostics payloads."""
+        diagnostics = {
+            "vbb_error": str(self),
+            "vbb_error_kind": self.kind,
+            "vbb_error_summary": self.summary,
+        }
+        if self.http_status is not None:
+            diagnostics["vbb_http_status"] = self.http_status
+        return diagnostics
+
+
+def _extract_http_status(exc: BaseException) -> int | None:
+    """Return an HTTP status code from a requests/urllib3 exception chain, if any."""
+    current: BaseException | None = exc
+    while current is not None:
+        response = getattr(current, "response", None)
+        if response is not None:
+            status_code = getattr(response, "status_code", None)
+            if isinstance(status_code, int):
+                return status_code
+        current = current.__cause__
+    return None
+
+
+def _is_timeout(exc: BaseException) -> bool:
+    """True when the exception chain indicates a read/connect timeout."""
+    current: BaseException | None = exc
+    while current is not None:
+        if isinstance(current, requests.Timeout):
+            return True
+        if "timed out" in str(current).lower():
+            return True
+        current = current.__cause__
+    return False
+
+
+def _classify_request_exception(exc: requests.RequestException) -> tuple[str, int | None]:
+    """Map a failed VBB request to a stable error kind and optional HTTP status."""
+    http_status = _extract_http_status(exc)
+    if http_status is not None:
+        return f"http_{http_status}", http_status
+    if _is_timeout(exc):
+        return "timeout", None
+    if isinstance(exc, requests.ConnectionError):
+        return "connection", None
+    return "unknown", None
+
 
 # Load configuration
 with open("config.json", "r") as f:
@@ -138,7 +215,8 @@ def _fetch_departures_from_vbb(station_id: str, timestamp: str) -> list[Departur
 
     except requests.RequestException as e:
         metrics.increment("vbb.error")
-        raise VBBAPIError(f"VBB API error: {e}") from e
+        kind, http_status = _classify_request_exception(e)
+        raise VBBAPIError(f"VBB API error: {e}", kind=kind, http_status=http_status) from e
 
 
 def get_inbound_trains_cached(station_id: str, timestamp: str) -> list[Departure]:

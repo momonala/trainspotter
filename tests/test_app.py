@@ -270,6 +270,9 @@ def test_api_display_data_used_fallback_true_when_stale(
 
     assert response.status_code == 200
     assert response.get_json()["used_fallback"] is True
+    diagnostics = response.get_json()["diagnostics"]
+    assert diagnostics["vbb_error_kind"] == "unknown"
+    assert diagnostics["vbb_error_summary"] == "VBB unreachable"
 
 
 @patch("src.app.get_inbound_trains_cached")
@@ -291,3 +294,5 @@ def test_api_display_data_returns_502_when_no_fallback_available(
     body = response.get_json()
     assert "diagnostics" in body
     assert body["diagnostics"]["station_id"] is not None
+    assert body["error"] == "VBB unreachable"
+    assert body["diagnostics"]["vbb_error_kind"] == "unknown"
