@@ -18,11 +18,6 @@ trainspotter/
 │   ├── datamodels.py           # Dataclasses: Station, Departure, Line, Location, Products, Color, Operator
 │   ├── quadrants.py            # Filter departures by quadrant config, group into QuadrantData
 │   ├── departures_fallback.py  # In-memory snapshot fallback for display when VBB is unreachable
-│   ├── observability/          # Observability package (Spyglass metrics + dashboard aggregation)
-│   │   ├── __init__.py         # Public observability exports used by app modules
-│   │   ├── metrics.py          # Spyglass configure_logging, metrics collector, request decorator
-│   │   ├── schemas.py          # Pydantic models for observability API payloads
-│   │   └── view.py             # Spyglass fetch helpers and observability summary builders
 │   ├── config.py               # Typed config accessors (reads pyproject.toml + config.json); exposes FLASK_PORT
 │   ├── trainspotter.py         # CLI terminal view (standalone, no server)
 │   └── values.example.py       # Template for values.py (git-ignored); set GMAPS_API_KEY here
@@ -395,6 +390,27 @@ Flask port is set in `pyproject.toml` under `[tool.config]`.
 | `/api/location` | POST | Set server-side browser coordinates `{latitude, longitude}` |
 | `/api/stations` | GET | Nearby stops with live departures. `?refresh=true` re-resolves stop list. |
 | `/api/display/data` | GET | Quadrant departure data for the fixed display station. Returns 502 if VBB fails and no fallback exists. |
+| `/observability` | GET | Redirect to the Spyglass dashboard for this project |
+
+### Observability (Spyglass)
+
+Metrics and logs are sent to a [Spyglass](https://github.com/momonala/spyglass) server (`spyglass_host` in `pyproject.toml`). Dashboard: `/observability` → `{spyglass_host}/dashboard/trainspotter`.
+
+Stat names are prefixed as `trainspotter.{caller_function}.{stat}`. VBB failures use tags for dashboard breakdown (`kind` on `vbb.error`, `outcome` on `vbb.fetch`).
+
+| Stat | Type | When |
+|------|------|------|
+| `display.fresh` | counter | Live VBB fetch succeeded |
+| `display.fallback` | counter | Served stale in-memory snapshot |
+| `display.no_snapshot` | counter | VBB failed, no usable snapshot |
+| `display.seconds_since_fresh` | gauge | `0` on fresh fetch; else seconds since snapshot `captured_at` |
+| `vbb.success` | counter | Departures HTTP fetch succeeded |
+| `vbb.error` | counter | Departures fetch failed (`tags: {kind: http_503 \| timeout \| …}`) |
+| `vbb.fetch` | timing | Upstream HTTP latency (`tags: {outcome: ok \| error}`) |
+| `vbb.cache_hit` / `vbb.cache_miss` | counter | LRU departures cache |
+| `response.502` | counter | Display hard error (`tags: {route: display_data}`) |
+
+VBB upstream errors are logged at WARNING with `error.kind` for log search in Spyglass.
 
 ### `GET /api/stations` response shape
 

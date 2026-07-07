@@ -7,6 +7,7 @@ import requests
 from src.datamodels import Station
 from src.vbb_api import VBBAPIError
 from src.vbb_api import _classify_request_exception
+from src.vbb_api import _fetch_departures_from_vbb
 from src.vbb_api import get_inbound_trains
 from src.vbb_api import get_nearby_stations
 
@@ -97,8 +98,16 @@ def test_get_nearby_stations_computes_haversine_distance():
     assert stations[0].distance > 0
 
 
+@pytest.fixture(autouse=True)
+def _clear_vbb_departures_cache():
+    _fetch_departures_from_vbb.cache_clear()
+    yield
+    _fetch_departures_from_vbb.cache_clear()
+
+
 @patch("src.vbb_api.session.get")
-def test_get_inbound_trains_success(mock_get):
+@patch("src.vbb_api.metrics")
+def test_get_inbound_trains_success(mock_metrics, mock_get):
     mock_response = Mock()
     mock_response.json.return_value = {
         "departures": [
@@ -140,11 +149,16 @@ def test_get_inbound_trains_success(mock_get):
 
     assert len(departures) == 1
     assert departures[0].line.name == "S41"
+    mock_metrics.increment.assert_any_call("vbb.success")
+    mock_metrics.increment.assert_any_call("vbb.cache_miss")
+    mock_metrics.timing.assert_called_once()
+    assert mock_metrics.timing.call_args.args[0] == "vbb.fetch"
+    assert mock_metrics.timing.call_args.kwargs["tags"] == {"outcome": "ok"}
 
 
 @patch("src.vbb_api.session.get")
-@patch("src.vbb_api.logger")
-def test_get_inbound_trains_handles_errors(mock_logger, mock_get):
+@patch("src.vbb_api.metrics")
+def test_get_inbound_trains_handles_errors(mock_metrics, mock_get):
     mock_get.side_effect = requests.RequestException("Network error")
 
     station = Mock(spec=Station)
@@ -155,6 +169,10 @@ def test_get_inbound_trains_handles_errors(mock_logger, mock_get):
 
     assert "Network error" in str(exc_info.value)
     assert exc_info.value.kind == "unknown"
+    mock_metrics.increment.assert_any_call("vbb.error", tags={"kind": "unknown"})
+    mock_metrics.increment.assert_any_call("vbb.cache_miss")
+    mock_metrics.timing.assert_called_once()
+    assert mock_metrics.timing.call_args.kwargs["tags"] == {"outcome": "error"}
 
 
 @pytest.mark.parametrize(

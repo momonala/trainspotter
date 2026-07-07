@@ -9,6 +9,7 @@ from freezegun import freeze_time
 
 import src.app as app_module
 import src.departures_fallback as departures_fallback_module
+from src.app import _emit_display_freshness_gauges
 from src.app import app
 from src.datamodels import Color
 from src.datamodels import Departure
@@ -202,6 +203,24 @@ def test_display_route_renders_html(client):
     response = client.get("/display")
     assert response.status_code == 200
     assert b"<!DOCTYPE html>" in response.data or b"<html" in response.data
+
+
+# =============================================================================
+# Display freshness gauges
+# =============================================================================
+
+
+@patch("src.app.metrics")
+def test_emit_display_freshness_gauges_on_fresh(mock_metrics):
+    _emit_display_freshness_gauges(fresh=True, diagnostics={})
+    mock_metrics.gauge.assert_called_once_with("display.seconds_since_fresh", 0)
+
+
+@patch("src.app.metrics")
+def test_emit_display_freshness_gauges_from_snapshot(mock_metrics):
+    diagnostics = {"snapshot": {"age_seconds": 300}}
+    _emit_display_freshness_gauges(fresh=False, diagnostics=diagnostics)
+    mock_metrics.gauge.assert_called_once_with("display.seconds_since_fresh", 300)
 
 
 # =============================================================================

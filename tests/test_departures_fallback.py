@@ -115,6 +115,7 @@ def test_get_snapshot_diagnostics_returns_metadata():
     diagnostics = get_snapshot_diagnostics(TEST_STATION_ID, now)
     assert diagnostics is not None
     assert diagnostics["snapshot_age"] == "00:04:05"
+    assert diagnostics["age_seconds"] == 245
     assert diagnostics["departure_count"] == 2
     assert diagnostics["captured_at"] == captured_at.isoformat()
 

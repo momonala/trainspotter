@@ -39,9 +39,10 @@ def get_snapshot_diagnostics(station_id: str, current_time_utc: datetime) -> dic
     snapshot = _snapshots_by_station_id.get(station_id)
     if snapshot is None:
         return None
-    elapsed_seconds = int((current_time_utc - snapshot.captured_at_utc).total_seconds())
+    age_seconds = int((current_time_utc - snapshot.captured_at_utc).total_seconds())
     return {
-        "snapshot_age": _format_hhmmss(elapsed_seconds),
+        "snapshot_age": _format_hhmmss(age_seconds),
+        "age_seconds": age_seconds,
         "departure_count": len(snapshot.departures),
         "captured_at": snapshot.captured_at_utc.isoformat(),
     }

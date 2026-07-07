@@ -1,6 +1,7 @@
 import json
 import logging
 import math
+import time
 from datetime import datetime
 from functools import lru_cache
 from operator import itemgetter
@@ -197,25 +198,28 @@ def get_nearby_stations(coordinates: tuple[float, float] | None = None) -> list[
 @lru_cache(maxsize=32)
 def _fetch_departures_from_vbb(station_id: str, timestamp: str) -> list[Departure]:
     """Fetch departures from VBB (LRU-cached by station and 30s bucket)."""
+    started = time.perf_counter()
     try:
-        with metrics.timed("vbb.fetch"):
-            departures_resp = session.get(
-                f"https://v6.vbb.transport.rest/stops/{station_id}/departures",
-                params={
-                    "duration": config["update_interval_min"],
-                    "linesOfStops": False,
-                    "remarks": False,
-                    "language": "en",
-                },
-                timeout=TIMEOUT,
-            )
-            departures_resp.raise_for_status()
-            departures_data = departures_resp.json()
+        departures_resp = session.get(
+            f"https://v6.vbb.transport.rest/stops/{station_id}/departures",
+            params={
+                "duration": config["update_interval_min"],
+                "linesOfStops": False,
+                "remarks": False,
+                "language": "en",
+            },
+            timeout=TIMEOUT,
+        )
+        departures_resp.raise_for_status()
+        departures_data = departures_resp.json()
+        metrics.timing("vbb.fetch", (time.perf_counter() - started) * 1000, tags={"outcome": "ok"})
+        metrics.increment("vbb.success")
         return parse_departures(departures_data)
 
     except requests.RequestException as e:
-        metrics.increment("vbb.error")
+        metrics.timing("vbb.fetch", (time.perf_counter() - started) * 1000, tags={"outcome": "error"})
         kind, http_status = _classify_request_exception(e)
+        metrics.increment("vbb.error", tags={"kind": kind})
         raise VBBAPIError(f"VBB API error: {e}", kind=kind, http_status=http_status) from e
 
 

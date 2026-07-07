@@ -138,6 +138,17 @@ def _attach_snapshot_diagnostics(diagnostics: dict, station_id: str, now: dateti
         diagnostics["snapshot"] = snapshot
 
 
+def _emit_display_freshness_gauges(*, fresh: bool, diagnostics: dict) -> None:
+    """Record how long since the last successful VBB fetch for the display station."""
+    if fresh:
+        metrics.gauge("display.seconds_since_fresh", 0)
+        return
+
+    age_seconds = (diagnostics.get("snapshot") or {}).get("age_seconds")
+    if age_seconds is not None:
+        metrics.gauge("display.seconds_since_fresh", age_seconds)
+
+
 def _fetch_display_departures(
     station_id: str, now: datetime, cache_key: str
 ) -> tuple[list[Departure] | None, bool, dict]:
@@ -148,14 +159,16 @@ def _fetch_display_departures(
         store_departures_snapshot(station_id, fresh_departures, now)
         metrics.increment("display.fresh")
         _attach_snapshot_diagnostics(diagnostics, station_id, now)
+        _emit_display_freshness_gauges(fresh=True, diagnostics=diagnostics)
         return fresh_departures, False, diagnostics
     except VBBAPIError as error:
-        logger.debug("VBB API error: %s", error)
+        logger.warning("VBB API error [%s]: %s", error.kind, error)
         diagnostics.update(error.to_diagnostics())
         _attach_snapshot_diagnostics(diagnostics, station_id, now)
         fallback_departures = get_fallback_departures(station_id, now)
         if fallback_departures is None:
             metrics.increment("display.no_snapshot")
+            _emit_display_freshness_gauges(fresh=False, diagnostics=diagnostics)
             logger.error(
                 "5XX VBB unreachable, no cached snapshot for station %s",
                 station_id,
@@ -163,12 +176,8 @@ def _fetch_display_departures(
             return None, False, diagnostics
 
         metrics.increment("display.fallback")
+        _emit_display_freshness_gauges(fresh=False, diagnostics=diagnostics)
         snapshot_info = diagnostics.get("snapshot") or {}
-        captured_at = snapshot_info.get("captured_at")
-        if captured_at is not None:
-            age_seconds = int((now - datetime.fromisoformat(captured_at)).total_seconds())
-            metrics.gauge("display.snapshot_age_seconds", age_seconds)
-
         age = snapshot_info.get("snapshot_age") or "unknown"
         logger.debug(
             "Serving stale snapshot station_id=%s age=%s count=%d",
