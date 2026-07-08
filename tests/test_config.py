@@ -17,6 +17,7 @@ runner = CliRunner()
         ("--project-version", "0.1.0"),
         ("--flask-port", "5007"),
         ("--spyglass-host", "localhost:5013"),
+        ("--vbb-api-base", "http://localhost:3000"),
     ],
 )
 def test_config_returns_single_value(flag: str, expected_output: str):

@@ -14,6 +14,7 @@ from urllib3.util.retry import Retry
 
 from .config import PROJECT_NAME
 from .config import SPYGLASS_HOST
+from .config import VBB_API_BASE
 from .datamodels import Departure
 from .datamodels import Station
 from .datamodels import parse_departures
@@ -201,7 +202,7 @@ def _fetch_departures_from_vbb(station_id: str, timestamp: str) -> list[Departur
     started = time.perf_counter()
     try:
         departures_resp = session.get(
-            f"https://v6.vbb.transport.rest/stops/{station_id}/departures",
+            f"{VBB_API_BASE}/stops/{station_id}/departures",
             params={
                 "duration": config["update_interval_min"],
                 "linesOfStops": False,

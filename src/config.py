@@ -16,6 +16,7 @@ _tool_config = _config["tool"]["config"]
 PROJECT_NAME = _project_config["name"]
 FLASK_PORT = _tool_config["flask_port"]
 SPYGLASS_HOST = _tool_config["spyglass_host"]
+VBB_API_BASE = _tool_config["vbb_api_base"].rstrip("/")
 
 _json_config_file = Path(__file__).parent.parent / "config.json"
 with _json_config_file.open("r") as f:
@@ -36,6 +37,7 @@ def config_cli(
     project_version: bool = typer.Option(False, "--project-version", help=_project_config['version']),
     flask_port: bool = typer.Option(False, "--flask-port", help=str(FLASK_PORT)),
     spyglass_host: bool = typer.Option(False, "--spyglass-host", help=SPYGLASS_HOST),
+    vbb_api_base: bool = typer.Option(False, "--vbb-api-base", help=VBB_API_BASE),
 ) -> None:
 # fmt: on
     if all:
@@ -43,6 +45,7 @@ def config_cli(
         typer.echo(f"project_version={_project_config['version']}")
         typer.echo(f"flask_port={FLASK_PORT}")
         typer.echo(f"spyglass_host={SPYGLASS_HOST}")
+        typer.echo(f"vbb_api_base={VBB_API_BASE}")
         return
 
     param_map = {
@@ -50,6 +53,7 @@ def config_cli(
         project_version: _project_config["version"],
         flask_port: FLASK_PORT,
         spyglass_host: SPYGLASS_HOST,
+        vbb_api_base: VBB_API_BASE,
     }
 
     for is_set, value in param_map.items():

@@ -33,6 +33,9 @@ dependencies = [
 [tool.config]
 flask_port = 5007
 spyglass_host = "localhost:5013"
+# Public VBB mirror: https://v6.vbb.transport.rest
+# Self-hosted (default): http://localhost:3000
+vbb_api_base = "http://localhost:3000"
 
 [build-system]
 requires = ["hatchling"]

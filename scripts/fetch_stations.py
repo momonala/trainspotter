@@ -15,7 +15,8 @@ from pathlib import Path
 
 import requests
 
-API_BASE = "https://v6.vbb.transport.rest"
+from src.config import VBB_API_BASE
+
 OUTPUT_PATH = Path(__file__).resolve().parent.parent / "data" / "vbb_stations.json"
 
 # Bounding box ~greater Berlin; step ~6–7 km so each /nearby call discovers local stops.
@@ -49,7 +50,7 @@ def berlin_grid_anchor_points() -> list[tuple[float, float]]:
 def fetch_nearby(lat: float, lon: float) -> list[dict]:
     """GET /locations/nearby for one anchor point."""
     resp = requests.get(
-        f"{API_BASE}/locations/nearby",
+        f"{VBB_API_BASE}/locations/nearby",
         params={"latitude": lat, "longitude": lon, "results": RESULTS_PER_POINT},
         timeout=TIMEOUT,
     )

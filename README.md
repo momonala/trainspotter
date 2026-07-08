@@ -356,7 +356,7 @@ Terminal-only view (no server):
 python src/trainspotter.py
 ```
 
-Flask port is set in `pyproject.toml` under `[tool.config]`.
+Flask port and VBB API base URL are set in `pyproject.toml` under `[tool.config]`.
 
 ---
 
@@ -534,7 +534,7 @@ Departure
 ## External dependencies
 
 ### VBB Transport REST API
-- Base: `https://v6.vbb.transport.rest`
+- Base URL: `vbb_api_base` in `pyproject.toml` (`[tool.config]`). Default: `http://localhost:3000`; for the public mirror use `https://v6.vbb.transport.rest`.
 - No auth required; unofficial API, no SLA.
 - `/locations/nearby` — build-time only (`scripts/fetch_stations.py`)
 - `/stops/{id}/departures` — live departures; retried up to 3× on 5xx, 5 s timeout per attempt
