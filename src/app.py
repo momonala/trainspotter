@@ -17,11 +17,7 @@ from spyglass import configure_logging
 from .config import FLASK_PORT
 from .config import PROJECT_NAME
 from .config import SPYGLASS_HOST
-from .datamodels import Departure
 from .datamodels import Station
-from .departures_fallback import get_fallback_departures
-from .departures_fallback import get_snapshot_diagnostics
-from .departures_fallback import store_departures_snapshot
 from .quadrants import filter_and_group
 from .utils import config
 from .utils import get_configured_walk_time
@@ -29,10 +25,9 @@ from .utils import get_thresholds
 from .utils import get_walk_time
 from .utils import process_station_departures
 from .vbb_api import VBBAPIError
+from .vbb_api import get_departures
 from .vbb_api import get_inbound_trains
-from .vbb_api import get_inbound_trains_cached
 from .vbb_api import get_nearby_stations
-from .vbb_api import vbb_cache_timestamp
 
 logger = logging.getLogger(__name__)
 
@@ -132,62 +127,6 @@ def api_stations():
     return jsonify({"stations": station_data, "config": config})
 
 
-def _attach_snapshot_diagnostics(diagnostics: dict, station_id: str, now: datetime) -> None:
-    snapshot = get_snapshot_diagnostics(station_id, now)
-    if snapshot is not None:
-        diagnostics["snapshot"] = snapshot
-
-
-def _emit_display_freshness_gauges(*, fresh: bool, diagnostics: dict) -> None:
-    """Record how long since the last successful VBB fetch for the display station."""
-    if fresh:
-        metrics.gauge("display.seconds_since_fresh", 0)
-        return
-
-    age_seconds = (diagnostics.get("snapshot") or {}).get("age_seconds")
-    if age_seconds is not None:
-        metrics.gauge("display.seconds_since_fresh", age_seconds)
-
-
-def _fetch_display_departures(
-    station_id: str, now: datetime, cache_key: str
-) -> tuple[list[Departure] | None, bool, dict]:
-    """Return departures (or None), stale-fallback flag, and diagnostics."""
-    diagnostics: dict = {"station_id": station_id}
-    try:
-        fresh_departures = get_inbound_trains_cached(station_id, cache_key) or []
-        store_departures_snapshot(station_id, fresh_departures, now)
-        metrics.increment("display.fresh")
-        _attach_snapshot_diagnostics(diagnostics, station_id, now)
-        _emit_display_freshness_gauges(fresh=True, diagnostics=diagnostics)
-        return fresh_departures, False, diagnostics
-    except VBBAPIError as error:
-        logger.warning("VBB API error [%s]: %s", error.kind, error)
-        diagnostics.update(error.to_diagnostics())
-        _attach_snapshot_diagnostics(diagnostics, station_id, now)
-        fallback_departures = get_fallback_departures(station_id, now)
-        if fallback_departures is None:
-            metrics.increment("display.no_snapshot")
-            _emit_display_freshness_gauges(fresh=False, diagnostics=diagnostics)
-            logger.error(
-                "5XX VBB unreachable, no cached snapshot for station %s",
-                station_id,
-            )
-            return None, False, diagnostics
-
-        metrics.increment("display.fallback")
-        _emit_display_freshness_gauges(fresh=False, diagnostics=diagnostics)
-        snapshot_info = diagnostics.get("snapshot") or {}
-        age = snapshot_info.get("snapshot_age") or "unknown"
-        logger.debug(
-            "Serving stale snapshot station_id=%s age=%s count=%d",
-            station_id,
-            age,
-            len(fallback_departures),
-        )
-        return fallback_departures, True, diagnostics
-
-
 @app.route("/api/display/data")
 @metrics.timed("display_data")
 def api_display_data():
@@ -195,22 +134,25 @@ def api_display_data():
     display_config = config["display"]
     station_id = display_config["station_id"]
     now = datetime.now(timezone.utc)
-    cache_key = vbb_cache_timestamp(now)
 
     try:
-        departures, used_fallback, diagnostics = _fetch_display_departures(station_id, now, cache_key)
-        if departures is None:
-            metrics.increment("response.502", tags={"route": "display_data"})
-            return make_response(
-                jsonify(
-                    {
-                        "error": diagnostics.get("vbb_error_summary", "VBB unreachable"),
-                        "detail": "No cached snapshot with future departures available",
-                        "diagnostics": diagnostics,
-                    }
-                ),
-                502,
-            )
+        departures = get_departures(station_id)
+    except VBBAPIError as error:
+        logger.warning("VBB API error [%s]: %s", error.kind, error)
+        diagnostics = {"station_id": station_id, **error.to_diagnostics()}
+        metrics.increment("response.502", tags={"route": "display_data"})
+        return make_response(
+            jsonify(
+                {
+                    "error": error.summary,
+                    "detail": str(error),
+                    "diagnostics": diagnostics,
+                }
+            ),
+            502,
+        )
+
+    try:
         # No cap: return every matching departure. The display shows 3 per quadrant
         # and reveals the rest via horizontal scroll (see .departures-row in display.css).
         quadrants_data = filter_and_group(
@@ -228,9 +170,7 @@ def api_display_data():
                 "station_name": display_config["station_name"],
                 "walk_time": walk_time,
                 "timestamp": timestamp.isoformat(),
-                "used_fallback": used_fallback,
                 "min_departure_min": config["min_departure_time_min"],
-                "diagnostics": diagnostics,
                 "quadrants": [
                     {
                         "key": q.key,

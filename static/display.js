@@ -101,7 +101,7 @@ function describeVbbUpstream(diag) {
 
 /**
  * Map a failed display fetch to engineering-facing copy.
- * Backend /api/display/data returns HTTP 502 when VBB fails with no fallback,
+ * Backend /api/display/data returns HTTP 502 when VBB fails,
  * or HTTP 500 for unexpected handler errors. The upstream VBB failure type
  * (timeout, 502, 503, …) is in diagnostics, not the HTTP status code.
  *
@@ -122,7 +122,7 @@ function describeDisplayFetchError(err) {
 
     if (status === 502) {
         const upstream = describeVbbUpstream(diag);
-        const detail = err.serverDetail || 'No cached snapshot with future departures';
+        const detail = err.serverDetail || 'VBB departures unavailable';
         const parts = [upstream.short, detail];
         if (diag?.vbb_error && !parts.some(p => diag.vbb_error.includes(p))) {
             parts.push(diag.vbb_error);
@@ -251,21 +251,18 @@ function renderAgedQuadrantsIfNeeded(nowMs = Date.now()) {
 // Display serving status (timer colour + header badge)
 // =============================================================================
 
-/** @typedef {'loading' | 'fresh' | 'stale' | 'error'} DisplayServingStatus */
+/** @typedef {'loading' | 'fresh' | 'error'} DisplayServingStatus */
 
 /**
- * Derive UI state from data provenance, not poll recency alone.
+ * Derive UI state from the latest fetch outcome.
  * @returns {DisplayServingStatus}
  */
 function resolveDisplayStatus() {
-    if (state.lastData) {
-        if (state.lastData.used_fallback) {
-            return 'stale';
-        }
-        return 'fresh';
-    }
     if (state.lastError) {
         return 'error';
+    }
+    if (state.lastData) {
+        return 'fresh';
     }
     return 'loading';
 }
@@ -292,14 +289,6 @@ function getStatusBadgeText(status) {
     if (status === 'error') {
         return state.lastError?.badge ?? '⚠\u2009no data';
     }
-    if (status !== 'stale') {
-        return null;
-    }
-    // Status is 'stale' only when used_fallback is true
-    if (state.lastData?.used_fallback) {
-        const upstream = describeVbbUpstream(state.lastData.diagnostics);
-        return `⚠\u2009stale snapshot · ${upstream.short}`;
-    }
     return null;
 }
 
@@ -323,7 +312,6 @@ function updateDisplayStatus() {
     if (timerEl) {
         timerEl.classList.remove(
             'last-updated-ago--fresh',
-            'last-updated-ago--stale',
             'last-updated-ago--error',
             'last-updated-ago--loading',
         );
@@ -332,9 +320,6 @@ function updateDisplayStatus() {
             timerEl.textContent = '';
         } else if (status === 'fresh') {
             timerEl.classList.add('last-updated-ago--fresh');
-            timerEl.textContent = formatLastUpdatedLabel();
-        } else if (status === 'stale') {
-            timerEl.classList.add('last-updated-ago--stale');
             timerEl.textContent = formatLastUpdatedLabel();
         } else {
             timerEl.classList.add('last-updated-ago--error');
@@ -353,10 +338,7 @@ function updateDisplayStatus() {
             if (status === 'error') {
                 badgeEl.classList.add('stale-badge--error');
             }
-            badgeEl.setAttribute(
-                'aria-label',
-                status === 'error' ? 'Error — tap for details' : 'Stale data — tap for details',
-            );
+            badgeEl.setAttribute('aria-label', 'Error — tap for details');
         } else {
             badgeEl.setAttribute('aria-label', 'Fetch status — tap for details');
         }
@@ -469,8 +451,8 @@ function vbbWarningMessage(diag) {
 function syncVbbWarning() {
     const modalEl = document.getElementById('modal-vbb-warning');
     const scheduleEl = document.getElementById('schedule-vbb-warning');
-    const vbbDown = !!(state.lastData?.used_fallback || state.lastError);
-    const diag = state.lastError?.err?.serverDiagnostics ?? state.lastData?.diagnostics;
+    const vbbDown = !!state.lastError;
+    const diag = state.lastError?.err?.serverDiagnostics;
     const message = vbbDown ? vbbWarningMessage(diag) : '';
     for (const el of [modalEl, scheduleEl]) {
         if (!el) continue;
@@ -661,24 +643,10 @@ function recordFetchError(err, copy) {
     };
 }
 
-/**
- * Render a full-grid error state.
- * If we already have good data, leave the quadrants intact and only
- * update the stale badge — aged departures are pruned separately.
- * @param {{ title: string, subtitle: string, badge: string }} copy
- * @param {boolean} isHard - true when no prior data exists (show full error card)
- */
-function showError(copy, isHard = false) {
+/** Render a full-grid error state spanning all quadrant cells. */
+function showError(copy) {
     console.error(`🚆 ${copy.title} — ${copy.subtitle}`);
 
-    // Soft error: keep last good data on screen, prune departed trains, update status
-    if (state.lastData && !isHard) {
-        updateDisplayStatus();
-        renderAgedQuadrantsIfNeeded();
-        return;
-    }
-
-    // Hard error (no data ever fetched): show a clear error card spanning the grid
     const grid = document.getElementById('display-grid');
     if (!grid) return;
     grid.innerHTML = '';
@@ -708,7 +676,7 @@ function showError(copy, isHard = false) {
 }
 
 // =============================================================================
-// Diagnostics modal (stale / error badge tap)
+// Diagnostics modal (error badge tap)
 // =============================================================================
 
 function formatDiagnosticsValue(value) {
@@ -721,7 +689,7 @@ function buildDiagnosticLines() {
     const lines = [];
     const fetchError = state.lastError;
     const raw = fetchError?.err;
-    const diag = raw?.serverDiagnostics ?? state.lastData?.diagnostics;
+    const diag = raw?.serverDiagnostics;
 
     if (fetchError) {
         lines.push(['Issue', fetchError.title]);
@@ -734,10 +702,6 @@ function buildDiagnosticLines() {
         if (fetchError.at) {
             lines.push(['Last failure', new Date(fetchError.at).toLocaleString('de-DE', { timeZone: BERLIN_TZ })]);
         }
-    } else if (state.lastData?.used_fallback) {
-        const upstream = describeVbbUpstream(state.lastData.diagnostics);
-        lines.push(['Issue', 'Serving stale snapshot']);
-        lines.push(['Summary', `${upstream.short} — departures time-shifted from last successful fetch`]);
     } else {
         lines.push(['Issue', 'No active fetch error']);
     }
@@ -748,11 +712,6 @@ function buildDiagnosticLines() {
         if (diag.vbb_error_kind) lines.push(['VBB error kind', diag.vbb_error_kind]);
         if (diag.vbb_http_status != null) lines.push(['VBB HTTP status', String(diag.vbb_http_status)]);
         if (diag.vbb_error) lines.push(['VBB error detail', diag.vbb_error]);
-        if (diag.snapshot) {
-            lines.push(['Snapshot age', diag.snapshot.snapshot_age ?? '—']);
-            lines.push(['Snapshot captured', diag.snapshot.captured_at ?? '—']);
-            lines.push(['Snapshot departures', String(diag.snapshot.departure_count ?? '—')]);
-        }
     }
 
     if (state.lastUpdatedAt) {
@@ -760,7 +719,6 @@ function buildDiagnosticLines() {
         lines.push(['Last fetch at', new Date(state.lastUpdatedAt).toLocaleString('de-DE', { timeZone: BERLIN_TZ })]);
     }
     if (state.lastData?.timestamp) lines.push(['Server timestamp', state.lastData.timestamp]);
-    if (state.lastData?.used_fallback != null) lines.push(['used_fallback', String(state.lastData.used_fallback)]);
     lines.push(['Display status', resolveDisplayStatus()]);
 
     lines.push(['Client fetch timeout', `${DISPLAY_CONFIG.FETCH_TIMEOUT_MS / 1000}s`]);
@@ -821,13 +779,15 @@ async function refresh() {
         state.lastAgedElapsedMin = null;
         state.lastRenderedSnapshot = departuresSnapshot(data.quadrants);
         renderQuadrants(data);
-        console.info(`[refresh] updated — station: ${data.station_name}, stale: ${data.used_fallback}`);
+        console.info(`[refresh] updated — station: ${data.station_name}`);
     } catch (err) {
         const copy = describeDisplayFetchError(err);
         recordFetchError(err, copy);
-        // Hard error only when we've never had good data; otherwise keep last display intact
-        showError(copy, /* isHard */ !state.lastData);
-        updateDisplayStatus();
+        state.lastData = null;
+        state.quadrantsByKey = new Map();
+        state.lastAgedElapsedMin = null;
+        state.lastRenderedSnapshot = null;
+        showError(copy);
     } finally {
         refreshInFlight = false;
     }

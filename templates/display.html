@@ -19,7 +19,7 @@
             <div class="header-right">
                 <button type="button" class="stale-badge" id="stale-badge"
                         aria-live="polite" aria-label="Fetch status — tap for details">
-                    ⚠&thinsp;stale data
+                    ⚠&thinsp;fetch error
                 </button>
                 <time class="header-time" id="header-time" aria-label="Current time"></time>
                 <span class="last-updated-ago" id="last-updated-ago" aria-live="polite"></span>
@@ -161,7 +161,7 @@
         </div>
     </div>
 
-    <!-- Diagnostics modal — shown when stale/error badge is tapped -->
+    <!-- Diagnostics modal — shown when error badge is tapped -->
     <div class="modal-overlay diagnostics-overlay" id="diagnostics-overlay" hidden
          role="dialog" aria-modal="true" aria-labelledby="diagnostics-modal-title">
         <div class="modal-card modal-card--diagnostics" id="diagnostics-modal-card">

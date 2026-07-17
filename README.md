@@ -13,11 +13,10 @@ Flask web app that shows departure boards for nearby Berlin VBB stops, colour-co
 trainspotter/
 ├── src/
 │   ├── app.py                  # Flask server, endpoint handlers, threading
-│   ├── vbb_api.py              # Station snapshot loading, haversine ranking, VBB departures client (LRU cache)
+│   ├── vbb_api.py              # Station snapshot loading, haversine ranking, VBB departures client
 │   ├── utils.py                # Walk time lookup, threshold calc, direction/provenance cleansing, Google Maps cache
 │   ├── datamodels.py           # Dataclasses: Station, Departure, Line, Location, Products, Color, Operator
 │   ├── quadrants.py            # Filter departures by quadrant config, group into QuadrantData
-│   ├── departures_fallback.py  # In-memory snapshot fallback for display when VBB is unreachable
 │   ├── config.py               # Typed config accessors (reads pyproject.toml + config.json); exposes FLASK_PORT
 │   ├── trainspotter.py         # CLI terminal view (standalone, no server)
 │   └── values.example.py       # Template for values.py (git-ignored); set GMAPS_API_KEY here
@@ -79,7 +78,6 @@ flowchart TB
     VbbMod[vbb_api.py]
     Utils[utils.py]
     Quadrants[quadrants.py]
-    Fallback[departures_fallback.py]
   end
 
   subgraph external [Network]
@@ -103,8 +101,7 @@ flowchart TB
   Api --> VbbMod
   Api --> Utils
   Api --> Quadrants
-  VbbMod -->|LRU cached per station/30s window| VBBdep
-  VbbMod -->|on VBBAPIError| Fallback
+  VbbMod --> VBBdep
   Utils -->|walk time if not in config| GMaps
   Api -->|JSON| Dashboard
   Api -->|JSON| Display
@@ -118,7 +115,7 @@ flowchart TB
 
 1. Browser POSTs coordinates to `/api/location` on geolocation.
 2. First `GET /api/stations?refresh=true` resolves nearby stops from the snapshot and caches them server-side.
-3. Each stop's departures are fetched in parallel (one thread per stop via `ThreadPoolExecutor`). VBB departures are LRU-cached keyed on `station_id + 30-second timestamp bucket`.
+3. Each stop's departures are fetched in parallel (one thread per stop via `ThreadPoolExecutor`).
 4. Walk time comes from `config.json["stations"]` if the station name matches; otherwise Google Maps (joblib disk cache in `.cache/`).
 5. Subsequent polls reuse the cached stop list, re-fetching only departures.
 
@@ -151,9 +148,9 @@ sequenceDiagram
 
 ### Display request flow
 
-`GET /display` serves a full-viewport landscape HTML page. JavaScript polls `GET /api/display/data` every 30 seconds and re-evaluates scheduled reminders every 1 second (clock tick). The endpoint uses the fixed `station_id` from `config.json["display"]`, fetches departures (with in-memory fallback from `departures_fallback.py` on `VBBAPIError`), groups them into four quadrants, and returns JSON. The page renders a 2×2 quadrant grid with Apple Liquid Glass styling optimised for iPad mini in landscape mode.
+`GET /display` serves a full-viewport landscape HTML page. JavaScript polls `GET /api/display/data` every 30 seconds and re-evaluates scheduled reminders every 1 second (clock tick). The endpoint uses the fixed `station_id` from `config.json["display"]`, fetches departures from VBB, groups them into four quadrants, and returns JSON. The page renders a 2×2 quadrant grid with Apple Liquid Glass styling optimised for iPad mini in landscape mode.
 
-When stale fallback data is served, the response includes `"used_fallback": true`. The display header uses a green timer with no badge for live VBB data, yellow timer + yellow badge for stale or unrefreshable board data, and red timer + red badge when no departures can be shown (hard fetch error).
+The display header uses a green timer with no badge for live VBB data, and a red timer + red badge when a fetch fails — the quadrant grid is replaced by a full-screen error card until the next successful poll.
 
 ```mermaid
 sequenceDiagram
@@ -389,7 +386,7 @@ Flask port and VBB API base URL are set in `pyproject.toml` under `[tool.config]
 | `/display` | GET | iPad landscape display page (2×2 quadrant board) |
 | `/api/location` | POST | Set server-side browser coordinates `{latitude, longitude}` |
 | `/api/stations` | GET | Nearby stops with live departures. `?refresh=true` re-resolves stop list. |
-| `/api/display/data` | GET | Quadrant departure data for the fixed display station. Returns 502 if VBB fails and no fallback exists. |
+| `/api/display/data` | GET | Quadrant departure data for the fixed display station. Returns 502 if VBB fails. |
 | `/observability` | GET | Redirect to the Spyglass dashboard for this project |
 
 ### Observability (Spyglass)
@@ -400,14 +397,9 @@ Stat names are prefixed as `trainspotter.{caller_function}.{stat}`. VBB failures
 
 | Stat | Type | When |
 |------|------|------|
-| `display.fresh` | counter | Live VBB fetch succeeded |
-| `display.fallback` | counter | Served stale in-memory snapshot |
-| `display.no_snapshot` | counter | VBB failed, no usable snapshot |
-| `display.seconds_since_fresh` | gauge | `0` on fresh fetch; else seconds since snapshot `captured_at` |
 | `vbb.success` | counter | Departures HTTP fetch succeeded |
 | `vbb.error` | counter | Departures fetch failed (`tags: {kind: http_503 \| timeout \| …}`) |
 | `vbb.fetch` | timing | Upstream HTTP latency (`tags: {outcome: ok \| error}`) |
-| `vbb.cache_hit` / `vbb.cache_miss` | counter | LRU departures cache |
 | `response.502` | counter | Display hard error (`tags: {route: display_data}`) |
 
 VBB upstream errors are logged at WARNING with `error.kind` for log search in Spyglass.
@@ -448,7 +440,7 @@ VBB upstream errors are logged at WARNING with `error.kind` for log search in Sp
   "station_name": "Bornholmerstr",
   "walk_time": 7,
   "timestamp": "2026-05-21T10:36:00+02:00",
-  "used_fallback": false,
+  "min_departure_min": 5,
   "quadrants": [
     {
       "key": "s1_26_up",
@@ -486,8 +478,6 @@ VBB upstream errors are logged at WARNING with `error.kind` for log search in Sp
 | `quadrants[].key` | Schedule matcher — ties a reminder to a quadrant (`display.quadrants[].key` in config). |
 | `quadrants[].departures[].minutes` | Floor minutes until departure; matcher adds 59 s to align with zoom modal. |
 | `walk_time` | Dashboard parity only; scheduler does not use it (leave-home is the zoom alarm). |
-
-`used_fallback: true` means VBB was unreachable and time-shifted stale departures are being served. The display page shows a yellow stale-data badge and yellow “last updated” timer in this case (not green).
 
 ### `transport_type` normalisation
 

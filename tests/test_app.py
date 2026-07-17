@@ -5,11 +5,8 @@ from unittest.mock import Mock
 from unittest.mock import patch
 
 import pytest
-from freezegun import freeze_time
 
 import src.app as app_module
-import src.departures_fallback as departures_fallback_module
-from src.app import _emit_display_freshness_gauges
 from src.app import app
 from src.datamodels import Color
 from src.datamodels import Departure
@@ -24,19 +21,13 @@ TEST_STATION_ID = "900110011"
 BASE_TIME_UTC = datetime(2026, 3, 24, 8, 0, 0, tzinfo=timezone.utc)
 
 
-def _clear_departure_snapshots() -> None:
-    departures_fallback_module._snapshots_by_station_id.clear()
-
-
 @pytest.fixture
 def client():
     app.config["TESTING"] = True
     app_module.browser_coordinates = None
     app_module.cached_stations = None
-    _clear_departure_snapshots()
     with app.test_client() as client:
         yield client
-    _clear_departure_snapshots()
 
 
 @pytest.fixture
@@ -206,46 +197,26 @@ def test_display_route_renders_html(client):
 
 
 # =============================================================================
-# Display freshness gauges
-# =============================================================================
-
-
-@patch("src.app.metrics")
-def test_emit_display_freshness_gauges_on_fresh(mock_metrics):
-    _emit_display_freshness_gauges(fresh=True, diagnostics={})
-    mock_metrics.gauge.assert_called_once_with("display.seconds_since_fresh", 0)
-
-
-@patch("src.app.metrics")
-def test_emit_display_freshness_gauges_from_snapshot(mock_metrics):
-    diagnostics = {"snapshot": {"age_seconds": 300}}
-    _emit_display_freshness_gauges(fresh=False, diagnostics=diagnostics)
-    mock_metrics.gauge.assert_called_once_with("display.seconds_since_fresh", 300)
-
-
-# =============================================================================
 # /api/display/data
 # =============================================================================
 
 
 @patch("src.app.filter_and_group", return_value=[])
-@patch("src.app.get_inbound_trains_cached", return_value=[])
-def test_api_display_data_returns_expected_shape(mock_trains, mock_filter, client):
+@patch("src.app.get_departures", return_value=[])
+def test_api_display_data_returns_expected_shape(mock_departures, mock_filter, client):
     response = client.get("/api/display/data")
     assert response.status_code == 200
     data = response.get_json()
     assert "station_name" in data
     assert "walk_time" in data
     assert "timestamp" in data
-    assert "used_fallback" in data
     assert "min_departure_min" in data
-    assert "diagnostics" in data
     assert "quadrants" in data
     assert isinstance(data["quadrants"], list)
 
 
-@patch("src.app.get_inbound_trains_cached", return_value=[])
-def test_api_display_data_quadrant_keys_match_config(mock_trains, client):
+@patch("src.app.get_departures", return_value=[])
+def test_api_display_data_quadrant_keys_match_config(mock_departures, client):
     from src.utils import config
 
     expected_keys = [q["key"] for q in config["display"]["quadrants"]]
@@ -255,59 +226,18 @@ def test_api_display_data_quadrant_keys_match_config(mock_trains, client):
     assert actual_keys == expected_keys
 
 
-@patch("src.app.get_inbound_trains_cached", return_value=[])
-def test_api_display_data_walk_time_from_config(mock_trains, client):
+@patch("src.app.get_departures", return_value=[])
+def test_api_display_data_walk_time_from_config(mock_departures, client):
     response = client.get("/api/display/data")
     assert response.status_code == 200
     assert response.get_json()["walk_time"] == 7
 
 
-@patch("src.app.filter_and_group", return_value=[])
-@patch("src.app.get_inbound_trains_cached", return_value=[])
-def test_api_display_data_used_fallback_false_on_fresh_data(mock_trains, mock_filter, client):
+@patch("src.app.get_departures")
+def test_api_display_data_returns_502_on_vbb_error(mock_get_departures, client):
+    mock_get_departures.side_effect = VBBAPIError("downstream unavailable")
+
     response = client.get("/api/display/data")
-    assert response.status_code == 200
-    assert response.get_json()["used_fallback"] is False
-
-
-@patch("src.app.filter_and_group", return_value=[])
-@patch("src.app.get_inbound_trains_cached")
-def test_api_display_data_used_fallback_true_when_stale(
-    mock_get_trains,
-    mock_filter,
-    client,
-    base_now_utc,
-    departure_factory,
-):
-    fresh = departure_factory(base_now_utc, minutes_until=16)
-    mock_get_trains.side_effect = [[fresh], VBBAPIError("downstream unavailable")]
-
-    with freeze_time(base_now_utc):
-        client.get(f"/api/display/data?station_id={TEST_STATION_ID}")
-    with freeze_time(base_now_utc + timedelta(seconds=20)):
-        response = client.get(f"/api/display/data?station_id={TEST_STATION_ID}")
-
-    assert response.status_code == 200
-    assert response.get_json()["used_fallback"] is True
-    diagnostics = response.get_json()["diagnostics"]
-    assert diagnostics["vbb_error_kind"] == "unknown"
-    assert diagnostics["vbb_error_summary"] == "VBB unreachable"
-
-
-@patch("src.app.get_inbound_trains_cached")
-def test_api_display_data_returns_502_when_no_fallback_available(
-    mock_get_trains,
-    client,
-    base_now_utc,
-    departure_factory,
-):
-    short_departure = departure_factory(base_now_utc, minutes_until=1)
-    mock_get_trains.side_effect = [[short_departure], VBBAPIError("downstream unavailable")]
-
-    with freeze_time(base_now_utc):
-        client.get(f"/api/display/data?station_id={TEST_STATION_ID}")
-    with freeze_time(base_now_utc + timedelta(minutes=2)):
-        response = client.get(f"/api/display/data?station_id={TEST_STATION_ID}")
 
     assert response.status_code == 502
     body = response.get_json()

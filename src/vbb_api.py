@@ -2,15 +2,12 @@ import json
 import logging
 import math
 import time
-from datetime import datetime
-from functools import lru_cache
 from operator import itemgetter
 from pathlib import Path
 
 import requests
 from requests.adapters import HTTPAdapter
 from spyglass import MetricsCollector
-from urllib3.util.retry import Retry
 
 from .config import PROJECT_NAME
 from .config import SPYGLASS_HOST
@@ -128,18 +125,11 @@ def _load_station_snapshot(path: Path) -> list[dict]:
 _STATIONS_PATH = Path(__file__).resolve().parent.parent / "data" / "vbb_stations.json"
 _ALL_STATIONS: list[dict] = _load_station_snapshot(_STATIONS_PATH)
 
-# Configure requests session with retries and timeouts
 session = requests.Session()
-retry_strategy = Retry(
-    total=3,  # number of retries
-    backoff_factor=0.5,  # wait 0.5, 1, 2 seconds between retries
-    status_forcelist=[500, 502, 503, 504],  # retry on these status codes
-)
-adapter = HTTPAdapter(max_retries=retry_strategy, pool_connections=10, pool_maxsize=10)
+adapter = HTTPAdapter(pool_connections=10, pool_maxsize=10)
 session.mount("http://", adapter)
 session.mount("https://", adapter)
 
-# Request timeout in seconds
 TIMEOUT = 5
 
 MAX_NEARBY_STATIONS = 20
@@ -196,9 +186,8 @@ def get_nearby_stations(coordinates: tuple[float, float] | None = None) -> list[
     return parsed
 
 
-@lru_cache(maxsize=32)
-def _fetch_departures_from_vbb(station_id: str, timestamp: str) -> list[Departure]:
-    """Fetch departures from VBB (LRU-cached by station and 30s bucket)."""
+def get_departures(station_id: str) -> list[Departure]:
+    """Fetch departures from VBB for a stop ID."""
     started = time.perf_counter()
     try:
         departures_resp = session.get(
@@ -224,26 +213,6 @@ def _fetch_departures_from_vbb(station_id: str, timestamp: str) -> list[Departur
         raise VBBAPIError(f"VBB API error: {e}", kind=kind, http_status=http_status) from e
 
 
-def get_inbound_trains_cached(station_id: str, timestamp: str) -> list[Departure]:
-    """Cached version of get_inbound_trains."""
-    before = _fetch_departures_from_vbb.cache_info()
-    try:
-        return _fetch_departures_from_vbb(station_id, timestamp)
-    finally:
-        after = _fetch_departures_from_vbb.cache_info()
-        if after.hits > before.hits:
-            metrics.increment("vbb.cache_hit")
-        elif after.misses > before.misses:
-            metrics.increment("vbb.cache_miss")
-
-
-def vbb_cache_timestamp(now: datetime | None = None) -> str:
-    """Return a cache bucket timestamp that changes every 30 seconds."""
-    if now is None:
-        now = datetime.now()
-    return now.strftime("%Y%m%d%H%M") + ("30" if now.second >= 30 else "00")
-
-
 def get_inbound_trains(station: Station) -> list[Departure]:
     """Get inbound trains for a given station."""
-    return get_inbound_trains_cached(station.id, vbb_cache_timestamp())
+    return get_departures(station.id)
