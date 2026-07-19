@@ -7,7 +7,7 @@
 const CONFIG = {
     FETCH_TIMEOUT_MS: 20000,
     RETRY_DELAY_MS: 5000,
-    REFRESH_INTERVAL_MS: 30000,
+    REFRESH_INTERVAL_MS: 10000,
     LAST_UPDATED_INTERVAL_MS: 1000,
     SCROLL_DEBOUNCE_MS: 50,
     WALK_TIME_BUFFER_MIN: 4,
@@ -501,7 +501,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         }
     }
 
-    // Refresh button fetches fresh departures only (same as 30s poll).
+    // Refresh button fetches fresh departures only (same as the poll).
     // To rediscover stations / walk times, do a full page reload.
     if (refreshButton) {
         refreshButton.addEventListener('click', () => refreshData(false));
