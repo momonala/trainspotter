@@ -239,7 +239,7 @@ Each entry in `displaySchedules`:
   "arrow": "↓",
   "lineFilter": "S25",
   "toleranceMinutes": 4,
-  "activeDepartureKey": null
+  "activeTripId": null
 }
 ```
 
@@ -252,11 +252,11 @@ Each entry in `displaySchedules`:
 | `label` / `arrow` | Group label and direction arrow of the resolved quadrant (for the badge). |
 | `lineFilter` | Single line within the quadrant (e.g. `"S25"`), or `null` to match the whole group. |
 | `toleranceMinutes` | ± window half-width in minutes (0–25). |
-| `activeDepartureKey` | Runtime fingerprint `"{line}:{departureMsTimestamp}"` of the **locked** departure; keyed on absolute departure time so the same physical train is stable across API refreshes. Once set it is not changed automatically — only when the locked train leaves the window, the user accepts a switch offer, or no candidate remains (cleared). |
+| `activeTripId` | VBB/HAFAS `tripId` of the **locked** departure. Stable across delay updates and API refreshes. Once set it is not changed automatically — only when the locked train leaves the window, the user accepts a switch offer, or no candidate remains (cleared). Legacy `activeDepartureKey` fingerprints are dropped on load. |
 
 Legacy schedules without `targetDate` default to today on load, without `repeatDays` default to `[]` (one-time), and without `toleranceMinutes` default to `4`.
 
-#### Spec: selection algorithm (`pickDepartureForSchedule`)
+#### Spec: selection algorithm (`evaluateSchedules`)
 
 Evaluated on every successful poll **and** every 1 s clock tick.
 
@@ -268,9 +268,9 @@ Evaluated on every successful poll **and** every 1 s clock tick.
    - `earliestMs ≤ depMs ≤ latestMs`
 
    Candidates are sorted by `|depMs − targetMs|` (closest to target first).
-4. **Lock** — when no train is locked yet, lock onto the closest candidate, store its `activeDepartureKey`, and auto-zoom (no minimum-minutes-away gate). Alarm (≤ 7 min) and auto-dismiss (≤ 5 min) behave identically to a manual tap.
-5. **Hold** — once locked, the schedule keeps that train. It is replaced automatically only when the locked train leaves the window (departs), at which point the next-closest candidate is locked.
-6. **Switch offer** — if a closer train appears while one is locked, a non-blocking bottom toast offers it (no sound). **Switch** locks the offered train and zooms to it; **×** dismisses and suppresses re-offering that same train. The matcher never switches on its own.
+4. **Lock** — when no train is locked yet, lock onto the closest candidate, store its `tripId` as `activeTripId`, and auto-zoom (no minimum-minutes-away gate). Alarm (≤ 7 min) and auto-dismiss (≤ 5 min) behave identically to a manual tap. Zoom also stores `tripId` and rebinds countdown time from live/aged data on each refresh.
+5. **Hold** — once locked, the schedule keeps that train (same `tripId`). It is replaced automatically only when the locked train leaves the window (departs), at which point the next-closest candidate is locked.
+6. **Switch offer** — if a closer train appears while one is locked, a non-blocking bottom toast offers it (no sound). **Switch** locks the offered train and zooms to it; **×** dismisses and suppresses re-offering that same trip. The matcher never switches on its own.
 
 **Example (target 10:03 ± 4):** when a train departing 9:59–10:07 first appears in the API, the zoom opens immediately and locks onto the one nearest 10:03. If a closer one shows up later, the toast offers it but the locked train stays put until you tap Switch. The alarm at ≤ 7 min fires to tell you to leave home.
 
@@ -447,8 +447,8 @@ VBB upstream errors are logged at WARNING with `error.kind` for log search in Sp
       "label": "S1/26",
       "arrow": "↑",
       "departures": [
-        { "minutes": 7,  "line": "S1"  },
-        { "minutes": 14, "line": "S26" }
+        { "tripId": "1|123|0|80|1012025", "minutes": 7,  "line": "S1",  "provenance": "Oranienburg" },
+        { "tripId": "1|456|0|80|1012025", "minutes": 14, "line": "S26", "provenance": "Teltow Stadt" }
       ]
     },
     {
@@ -461,7 +461,7 @@ VBB upstream errors are logged at WARNING with `error.kind` for log search in Sp
       "key": "s8_up",
       "label": "S8/85",
       "arrow": "↑",
-      "departures": [{ "minutes": 11, "line": "S8" }]
+      "departures": [{ "tripId": "1|789|0|80|1012025", "minutes": 11, "line": "S8", "provenance": "Birkenwerder" }]
     },
     {
       "key": "s8_clockwise",
@@ -476,6 +476,7 @@ VBB upstream errors are logged at WARNING with `error.kind` for log search in Sp
 | Field | Used by |
 |-------|---------|
 | `quadrants[].key` | Schedule matcher — ties a reminder to a quadrant (`display.quadrants[].key` in config). |
+| `quadrants[].departures[].tripId` | VBB/HAFAS trip identity — schedule lock and zoom rebind across polls/delays. |
 | `quadrants[].departures[].minutes` | Floor minutes until departure; matcher adds 59 s to align with zoom modal. |
 | `walk_time` | Dashboard parity only; scheduler does not use it (leave-home is the zoom alarm). |
 

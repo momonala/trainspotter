@@ -11,6 +11,9 @@ from .utils import get_initial_bearing
 
 @dataclass(frozen=True)
 class DepartureSlot:
+    """One catchable departure in a quadrant, keyed by VBB/HAFAS tripId."""
+
+    tripId: str
     minutes: int
     line: str
     provenance: str
@@ -70,9 +73,19 @@ def filter_and_group(
         if minutes < min_minutes:
             continue
 
+        if not dep.tripId:
+            raise ValueError(f"Departure missing tripId for line {line!r}")
+
         for key, lines in lines_by_key.items():
             if line in lines and direction_by_key[key] == direction:
-                groups[key].append(DepartureSlot(minutes=minutes, line=line, provenance=dep.provenance))
+                groups[key].append(
+                    DepartureSlot(
+                        tripId=dep.tripId,
+                        minutes=minutes,
+                        line=line,
+                        provenance=dep.provenance,
+                    )
+                )
                 break
 
     for key in groups:

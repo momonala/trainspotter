@@ -58,7 +58,8 @@ const state = {
 // Zoom modal state
 const zoom = {
     active: false,
-    departureTime: null,  // absolute ms — computed when zoom opens
+    tripId: null,         // VBB tripId of the zoomed departure; used to rebind on refresh
+    departureTime: null,  // absolute ms — updated from live data when tripId is found
     alarmArmed: false,    // flips false once alarm fires (threshold: 7 min)
     autoCloseArmed: false,// flips false once auto-dismiss fires (threshold: 5 min)
 };
@@ -206,7 +207,7 @@ async function fetchDisplayData() {
 function departuresSnapshot(quadrants) {
     return JSON.stringify(
         (quadrants ?? []).map(q =>
-            (q.departures ?? []).map(dep => `${dep.line}:${dep.minutes}`),
+            (q.departures ?? []).map(dep => `${dep.tripId}:${dep.minutes}`),
         ),
     );
 }
@@ -245,6 +246,7 @@ function renderAgedQuadrantsIfNeeded(nowMs = Date.now()) {
     rebuildQuadrantIndex(aged);
     state.lastRenderedSnapshot = snapshot;
     renderQuadrants(aged);
+    syncZoomDeparture();
 }
 
 // =============================================================================
@@ -466,9 +468,31 @@ function departureMsFromFloorMinutes(dep, nowMs = Date.now()) {
     return nowMs + dep.minutes * 60_000 + FLOOR_MINUTES_OFFSET_MS;
 }
 
+/** Find a departure across all quadrants by VBB tripId. */
+function findDepartureByTripId(tripId) {
+    if (!tripId) return null;
+    for (const quadrant of state.quadrantsByKey.values()) {
+        const match = (quadrant.departures ?? []).find(dep => dep.tripId === tripId);
+        if (match) return match;
+    }
+    return null;
+}
+
+/**
+ * Keep zoom countdown aligned with live (or aged) data for the locked trip.
+ * Called after refresh and after client-side aging rebuilds the quadrant index.
+ */
+function syncZoomDeparture() {
+    if (!zoom.active || !zoom.tripId) return;
+    const dep = findDepartureByTripId(zoom.tripId);
+    if (!dep) return;
+    zoom.departureTime = departureMsFromFloorMinutes(dep);
+}
+
 function openZoom(dep, arrow) {
     unlockAudio();  // must happen inside tap handler so iOS allows audio
     zoom.active = true;
+    zoom.tripId = dep.tripId;
     zoom.departureTime = departureMsFromFloorMinutes(dep);
     zoom.alarmArmed = dep.minutes > 7;      // arm alarm threshold (7 min)
     zoom.autoCloseArmed = dep.minutes > 5;  // arm auto-dismiss threshold (5 min)
@@ -525,6 +549,7 @@ function closeZoom() {
         beforeClose: () => {
             stopAlarm();
             zoom.active = false;
+            zoom.tripId = null;
             zoom.alarmArmed = false;
             zoom.autoCloseArmed = false;
             document.getElementById('modal-card')?.classList.remove('alarming');
@@ -779,6 +804,7 @@ async function refresh() {
         state.lastAgedElapsedMin = null;
         state.lastRenderedSnapshot = departuresSnapshot(data.quadrants);
         renderQuadrants(data);
+        syncZoomDeparture();
         console.info(`[refresh] updated — station: ${data.station_name}`);
     } catch (err) {
         const copy = describeDisplayFetchError(err);
@@ -892,7 +918,7 @@ window.addEventListener('DOMContentLoaded', () => {
  *   arrow: string,
  *   lineFilter: string|null,          — single line within the group, or null for all
  *   toleranceMinutes: number,         — ± window half-width around targetMinutes
- *   activeDepartureKey: string|null,
+ *   activeTripId: string|null,        — VBB tripId of the locked departure (runtime)
  * }
  */
 let schedules = [];
@@ -1005,12 +1031,17 @@ function loadSchedules() {
         schedules = [];
     }
     const today = berlinDateString();
-    schedules = schedules.map(s => ({
-        ...s,
-        targetDate: s.targetDate ?? today,
-        repeatDays: s.repeatDays ?? [],
-        toleranceMinutes: s.toleranceMinutes ?? SCHEDULE_CONFIG.DEFAULT_TOLERANCE_MIN,
-    }));
+    schedules = schedules.map(s => {
+        const { activeDepartureKey: _legacyKey, ...rest } = s;
+        return {
+            ...rest,
+            targetDate: s.targetDate ?? today,
+            repeatDays: s.repeatDays ?? [],
+            toleranceMinutes: s.toleranceMinutes ?? SCHEDULE_CONFIG.DEFAULT_TOLERANCE_MIN,
+            // Drop legacy line:time fingerprints — they cannot match tripId locks.
+            activeTripId: s.activeTripId ?? null,
+        };
+    });
 }
 
 function saveSchedulesToStorage() {
@@ -1403,7 +1434,7 @@ function saveSchedule() {
         arrow: quadrantData.arrow,
         lineFilter: scheduleModalLineFilter,
         toleranceMinutes: readToleranceMinutes(),
-        activeDepartureKey: null,
+        activeTripId: null,
     };
 
     if (scheduleModalEditId) {
@@ -1425,21 +1456,6 @@ function saveSchedule() {
 // =============================================================================
 // Scheduler — matcher & auto-zoom
 // =============================================================================
-
-/**
- * Stable fingerprint for a departure, invariant across per-minute aging.
- *
- * state.quadrantsByKey is rebuilt from aged data so dep.minutes decrements each
- * minute; adding elapsedMin recovers the original fetch-relative minutes, giving
- * a constant key for the same physical train between API fetches.
- */
-function stableDepartureKey(dep, nowMs) {
-    const elapsedMin = state.lastUpdatedAt != null
-        ? Math.floor((nowMs - state.lastUpdatedAt) / 60_000)
-        : 0;
-    const stableMs = (state.lastUpdatedAt ?? nowMs) + (dep.minutes + elapsedMin) * 60_000 + FLOOR_MINUTES_OFFSET_MS;
-    return `${dep.line}:${stableMs}`;
-}
 
 /**
  * Departures in the scheduled quadrant that fall inside the ± window, sorted by
@@ -1474,9 +1490,10 @@ function candidatesForSchedule(schedule, quadrant, nowMs) {
  * Called after each successful API refresh and on every clock tick.
  *
  * Behaviour: lock onto the first qualifying train (the one closest to target at
- * first match) and never switch automatically. If a closer train later appears
- * while one is locked, surface a non-blocking "switch" offer instead — the user
- * decides. The locked train is only replaced when it leaves the window (departs).
+ * first match) and never switch automatically. Identity is VBB tripId. If a closer
+ * train later appears while one is locked, surface a non-blocking "switch" offer
+ * instead — the user decides. The locked train is only replaced when it leaves
+ * the window (departs) or the user accepts a switch.
  */
 function evaluateSchedules() {
     if (!state.lastData || schedules.length === 0) return;
@@ -1496,34 +1513,34 @@ function evaluateSchedules() {
         const candidates = candidatesForSchedule(schedule, quadrant, nowMs);
 
         if (candidates.length === 0) {
-            schedule.activeDepartureKey = null;
+            schedule.activeTripId = null;
             dismissSwitchOffer(schedule.id);
             continue;
         }
 
         const ideal = candidates[0];  // closest to target
-        const idealKey = stableDepartureKey(ideal, nowMs);
+        const idealTripId = ideal.tripId;
 
         // Is the locked train still in the window?
-        const locked = schedule.activeDepartureKey
-            ? candidates.find(d => stableDepartureKey(d, nowMs) === schedule.activeDepartureKey)
+        const locked = schedule.activeTripId
+            ? candidates.find(d => d.tripId === schedule.activeTripId)
             : null;
 
         // Nothing locked yet (first match, or the locked train has departed) →
         // lock onto the closest train and zoom, exactly like a manual tap.
         if (!locked) {
-            // Manual zoom open: don't steal it. Leave the key unset so we lock once it closes.
+            // Manual zoom open: don't steal it. Leave activeTripId unset so we lock once it closes.
             if (zoom.active) continue;
-            schedule.activeDepartureKey = idealKey;
+            schedule.activeTripId = idealTripId;
             dismissSwitchOffer(schedule.id);
-            console.info(`[evaluateSchedules] auto-zoom for "${formatScheduleLabel(schedule)}" → ${idealKey}`);
+            console.info(`[evaluateSchedules] auto-zoom for "${formatScheduleLabel(schedule)}" → ${idealTripId}`);
             openZoom(ideal, schedule.arrow);
             continue;
         }
 
         // A train is locked. Never switch automatically — if a closer one exists, offer it.
-        if (idealKey !== schedule.activeDepartureKey) {
-            showSwitchOffer(schedule, ideal, idealKey);
+        if (idealTripId !== schedule.activeTripId) {
+            showSwitchOffer(schedule, ideal, idealTripId);
         } else {
             dismissSwitchOffer(schedule.id);
         }
@@ -1542,12 +1559,12 @@ const dismissedOfferKeys = new Set();  // offered trains the user dismissed — 
  * keeps the captured departure fresh without re-running the entry animation
  * (setting hidden=false when already visible is a no-op for display).
  */
-function showSwitchOffer(schedule, dep, key) {
-    if (dismissedOfferKeys.has(key)) return;
+function showSwitchOffer(schedule, dep, tripId) {
+    if (dismissedOfferKeys.has(tripId)) return;
     const offer = document.getElementById('switch-offer');
     if (!offer) return;
 
-    switchOffer = { scheduleId: schedule.id, key };
+    switchOffer = { scheduleId: schedule.id, key: tripId };
 
     const timeStr = new Date(departureMsFromFloorMinutes(dep)).toLocaleTimeString('de-DE', {
         hour: '2-digit', minute: '2-digit',
@@ -1556,15 +1573,15 @@ function showSwitchOffer(schedule, dep, key) {
     if (labelEl) labelEl.textContent = `${dep.line} · ${timeStr}`;
 
     const acceptBtn = document.getElementById('switch-offer-accept');
-    if (acceptBtn) acceptBtn.onclick = () => acceptSwitchOffer(schedule.id, dep, key);
+    if (acceptBtn) acceptBtn.onclick = () => acceptSwitchOffer(schedule.id, dep, tripId);
 
     offer.hidden = false;
 }
 
 /** Accept the offered train: lock it and zoom (the tap is the audio-unlock gesture). */
-function acceptSwitchOffer(scheduleId, dep, key) {
+function acceptSwitchOffer(scheduleId, dep, tripId) {
     const schedule = schedules.find(s => s.id === scheduleId);
-    if (schedule) schedule.activeDepartureKey = key;
+    if (schedule) schedule.activeTripId = tripId;
     hideSwitchOffer();
     openZoom(dep, schedule?.arrow);
 }

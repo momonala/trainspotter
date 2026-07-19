@@ -215,6 +215,37 @@ def test_api_display_data_returns_expected_shape(mock_departures, mock_filter, c
     assert isinstance(data["quadrants"], list)
 
 
+@patch("src.app.filter_and_group")
+@patch("src.app.get_departures", return_value=[])
+def test_api_display_data_departures_include_trip_id(mock_departures, mock_filter, client):
+    from src.quadrants import DepartureSlot
+    from src.quadrants import QuadrantData
+
+    mock_filter.return_value = [
+        QuadrantData(
+            key="s1_26_up",
+            label="S1/26",
+            arrow="↑",
+            departures=[
+                DepartureSlot(tripId="trip-abc", minutes=10, line="S1", provenance="Oranienburg"),
+            ],
+        ),
+        QuadrantData(key="s1_26_down", label="S1/26", arrow="↓", departures=[]),
+        QuadrantData(key="s8_up", label="S8/85", arrow="↑", departures=[]),
+        QuadrantData(key="s8_clockwise", label="S8/85", arrow="↻", departures=[]),
+    ]
+
+    response = client.get("/api/display/data")
+    assert response.status_code == 200
+    dep = response.get_json()["quadrants"][0]["departures"][0]
+    assert dep == {
+        "tripId": "trip-abc",
+        "minutes": 10,
+        "line": "S1",
+        "provenance": "Oranienburg",
+    }
+
+
 @patch("src.app.get_departures", return_value=[])
 def test_api_display_data_quadrant_keys_match_config(mock_departures, client):
     from src.utils import config

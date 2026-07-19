@@ -178,7 +178,13 @@ def api_display_data():
                         "arrow": q.arrow,
                         "lines": next(c["lines"] for c in display_config["quadrants"] if c["key"] == q.key),
                         "departures": [
-                            {"minutes": d.minutes, "line": d.line, "provenance": d.provenance} for d in q.departures
+                            {
+                                "tripId": d.tripId,
+                                "minutes": d.minutes,
+                                "line": d.line,
+                                "provenance": d.provenance,
+                            }
+                            for d in q.departures
                         ],
                     }
                     for q in quadrants_data
