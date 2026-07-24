@@ -8,7 +8,6 @@ from datetime import timezone
 from pathlib import Path
 
 import googlemaps
-import numpy as np
 from joblib import Memory
 
 from .datamodels import Departure
@@ -43,7 +42,7 @@ def _get_walk_time_gmaps(origin: tuple[float, float], destination: tuple[float, 
         origin,
         destination,
     )
-    return np.ceil(duration_min)
+    return math.ceil(duration_min)
 
 
 def get_configured_walk_time(station_name: str) -> int | None:

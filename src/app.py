@@ -198,7 +198,7 @@ def api_display_data():
 
 def main():
     logger.info("Starting server at http://localhost:%s", FLASK_PORT)
-    app.run(host="0.0.0.0", port=FLASK_PORT, debug=True)
+    app.run(host="0.0.0.0", port=FLASK_PORT, debug=False)
 
 
 if __name__ == "__main__":
