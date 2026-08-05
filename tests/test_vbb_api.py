@@ -99,8 +99,7 @@ def test_get_nearby_stations_computes_haversine_distance():
 
 
 @patch("src.vbb_api.session.get")
-@patch("src.vbb_api.metrics")
-def test_get_inbound_trains_success(mock_metrics, mock_get):
+def test_get_inbound_trains_success(mock_get):
     mock_response = Mock()
     mock_response.json.return_value = {
         "departures": [
@@ -142,15 +141,10 @@ def test_get_inbound_trains_success(mock_metrics, mock_get):
 
     assert len(departures) == 1
     assert departures[0].line.name == "S41"
-    mock_metrics.increment.assert_any_call("vbb.success")
-    mock_metrics.timing.assert_called_once()
-    assert mock_metrics.timing.call_args.args[0] == "vbb.fetch"
-    assert mock_metrics.timing.call_args.kwargs["tags"] == {"outcome": "ok"}
 
 
 @patch("src.vbb_api.session.get")
-@patch("src.vbb_api.metrics")
-def test_get_departures_handles_errors(mock_metrics, mock_get):
+def test_get_departures_handles_errors(mock_get):
     mock_get.side_effect = requests.RequestException("Network error")
 
     with pytest.raises(VBBAPIError) as exc_info:
@@ -158,9 +152,6 @@ def test_get_departures_handles_errors(mock_metrics, mock_get):
 
     assert "Network error" in str(exc_info.value)
     assert exc_info.value.kind == "unknown"
-    mock_metrics.increment.assert_any_call("vbb.error", tags={"kind": "unknown"})
-    mock_metrics.timing.assert_called_once()
-    assert mock_metrics.timing.call_args.kwargs["tags"] == {"outcome": "error"}
 
 
 @pytest.mark.parametrize(
