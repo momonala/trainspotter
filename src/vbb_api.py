@@ -7,6 +7,7 @@ from pathlib import Path
 import requests
 from requests.adapters import HTTPAdapter
 from spyglass import MetricsCollector
+from urllib3.util import Retry
 
 from .config import PROJECT_NAME
 from .config import SPYGLASS_HOST
@@ -125,7 +126,8 @@ _STATIONS_PATH = Path(__file__).resolve().parent.parent / "data" / "vbb_stations
 _ALL_STATIONS: list[dict] = _load_station_snapshot(_STATIONS_PATH)
 
 session = requests.Session()
-adapter = HTTPAdapter(pool_connections=10, pool_maxsize=10)
+retries = Retry(total=3, backoff_factor=0.5, status_forcelist=[500, 502, 503, 504])
+adapter = HTTPAdapter(pool_connections=10, pool_maxsize=10, max_retries=retries)
 session.mount("http://", adapter)
 session.mount("https://", adapter)
 
