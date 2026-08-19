@@ -19,7 +19,7 @@ trainspotter/
 │   ├── quadrants.py            # Filter departures by quadrant config, group into QuadrantData
 │   ├── config.py               # Typed config accessors (reads pyproject.toml + config.json); exposes FLASK_PORT
 │   ├── trainspotter.py         # CLI terminal view (standalone, no server)
-│   └── values.example.py       # Template for values.py (git-ignored); set GMAPS_API_KEY here
+│   └── values.py.example       # Template for values.py (git-ignored); set GMAPS_API_KEY here
 ├── data/
 │   └── vbb_stations.json       # Static stop snapshot (~thousands of stops); regenerate with scripts/fetch_stations.py
 ├── scripts/
@@ -49,7 +49,7 @@ Stops come from a **bundled JSON snapshot** (`data/vbb_stations.json`), not from
 Run when the fetch grid changes or stop metadata needs refreshing (new platforms, renames):
 
 ```bash
-python scripts/fetch_stations.py
+uv run python scripts/fetch_stations.py
 ```
 
 ```mermaid
@@ -183,177 +183,13 @@ sequenceDiagram
 
 ### Display page interactions
 
-Departure badges are interactive. Tapping one opens a full-screen zoom modal showing the live countdown, direction arrow, and BVG line chip.
-
-**Alarm thresholds (zoom modal only):**
-
-| Threshold | Behaviour |
-|-----------|-----------|
-| ≤ 7 min | Alarm sounds (Web Audio API) + red pulse animation. Fires once when countdown crosses 7, then repeats every 1.8 s. |
-| ≤ 5 min | Modal auto-dismisses — returns to the quadrant grid. |
-| 60 s after alarm start | Alarm auto-stops (prevents indefinite noise if user walks away). |
-
-**Urgent state (main grid):** Badges at ≤ 7 min pulse their minutes number red — no alarm, purely visual.
-
-**Mute button:** The speaker icon in the header mutes/unmutes the alarm. State persists in `localStorage` (`alarmMuted`).
-
-**iOS audio note:** `AudioContext` on iOS Safari starts suspended and can only be unlocked inside a user-gesture handler. `unlockAudio()` runs when opening the schedule modal (+ button) and when saving a schedule, so auto-triggered zoom alarms work. Manual badge taps also call it via `openZoom()`.
-
-**Minutes accuracy:** The server returns integer minutes (floor value). The zoom modal offsets the departure timestamp by +59 s so the initial countdown display always matches what the badge showed, rather than appearing one minute lower on open.
+Tapping a departure badge opens a full-screen zoom modal with a live countdown, direction arrow, and BVG line chip. The alarm sounds (Web Audio API + red pulse) at ≤7 min, the modal auto-dismisses at ≤5 min, and the alarm auto-stops 60s after it starts. Badges at ≤7 min also pulse red on the main grid (visual only, no sound). A header speaker icon mutes/unmutes the alarm (persisted in `localStorage`). iOS Safari suspends `AudioContext` until a user gesture, so `unlockAudio()` runs on schedule-modal open/save and on manual badge taps.
 
 ### Scheduled train reminders
 
-Client-side feature in `display.js`. No server persistence — schedules live in `localStorage` under `displaySchedules`.
+A client-side feature in `display.js`, persisted only in `localStorage` (`displaySchedules`) — no server involvement. The user picks a target departure time, a ±tolerance window (0–25 min, default 4), and a direction+line (validated against the live quadrant list). When a departure first appears inside that window, the zoom modal opens and **locks** onto it (same alarm/countdown as a manual tap); it holds that train until it departs, at which point the next-closest candidate locks. If a closer train appears while one is locked, a non-blocking toast offers a switch — it never switches automatically. Evaluation (`evaluateSchedules`) runs on every poll and every 1s clock tick against the live quadrant departures.
 
-#### User flow
-
-1. Tap **+** in the header → scroll wheels for time (`HH : MM`), **± tolerance** (0–25 min, default 4), **direction** (Up/Down/Clockwise/…), and **line** (group label like `S1/26` or an individual line like `S25`).
-2. Time wheels default to the current **Berlin** time. If the selected time is **≤ now**, the hint shows **Tomorrow** and save stores the next calendar day.
-3. The direction + line wheels must resolve to a real quadrant. Invalid pairings (e.g. `S1/26 Clockwise`) show an inline error and disable Save. A badge appears in the header (e.g. `10:33 S25 ↓ · ±4m`).
-4. Tap **×** on a badge to remove that schedule; tap its text to edit.
-5. When the matcher fires, the zoom modal opens automatically (same alarm/countdown as a manual tap). It **locks** onto that train and never switches on its own. If a closer train later appears, a small non-blocking toast at the bottom offers it — tap **Switch** to move to it, or **×** to dismiss.
-
-The line wheel offers both group labels (whole quadrant) and individual lines (line filter within that quadrant). The combination is validated against the live quadrant list: a pairing is valid only if some quadrant has that direction **and** carries that line (or matches that group label).
-
-#### Spec: what the target time means
-
-| Concept | Meaning |
-|---------|---------|
-| **Target time** | The train **departure** you want (e.g. 10:03). |
-| **Tolerance (±)** | Half-width of the acceptable window, in minutes (0–25, default 4). |
-| **Acceptable window** | Departures from `(target − tolerance)` through `(target + tolerance)` — e.g. 9:59–10:07 for `10:03 ± 4`. Any train in this window is valid; the one **closest to the target** is preferred. |
-| **Leave home** | **Not** part of the scheduler. Handled by the zoom modal alarm at ≤ 7 min before departure. |
-
-#### Spec: schedule object (`localStorage`)
-
-Each entry in `displaySchedules`:
-
-```json
-{
-  "id": "uuid",
-  "targetMinutes": 633,
-  "targetDate": "2026-05-24",
-  "repeatDays": [],
-  "quadrantKey": "s1_26_down",
-  "label": "S1/26",
-  "arrow": "↓",
-  "lineFilter": "S25",
-  "toleranceMinutes": 4,
-  "activeTripId": null
-}
-```
-
-| Field | Description |
-|-------|-------------|
-| `targetMinutes` | Minutes from Berlin midnight, 0–1439 (e.g. 633 = 10:33). |
-| `targetDate` | Berlin calendar day `YYYY-MM-DD` for one-time schedules. `null` for repeating schedules (date is computed dynamically from `repeatDays`). Set to tomorrow when `targetMinutes ≤ now` at save time. |
-| `repeatDays` | JS day-of-week values (0=Sun … 6=Sat) on which the reminder repeats. Empty array = one-time. When non-empty, `targetDate` is `null` and the next matching calendar day is computed each evaluation. |
-| `quadrantKey` | Matches `quadrants[].key` from `/api/display/data` (from `config.json` `display.quadrants`). Resolved from the direction + line wheels. |
-| `label` / `arrow` | Group label and direction arrow of the resolved quadrant (for the badge). |
-| `lineFilter` | Single line within the quadrant (e.g. `"S25"`), or `null` to match the whole group. |
-| `toleranceMinutes` | ± window half-width in minutes (0–25). |
-| `activeTripId` | VBB/HAFAS `tripId` of the **locked** departure. Stable across delay updates and API refreshes. Once set it is not changed automatically — only when the locked train leaves the window, the user accepts a switch offer, or no candidate remains (cleared). Legacy `activeDepartureKey` fingerprints are dropped on load. |
-
-Legacy schedules without `targetDate` default to today on load, without `repeatDays` default to `[]` (one-time), and without `toleranceMinutes` default to `4`.
-
-#### Spec: selection algorithm (`evaluateSchedules`)
-
-Evaluated on every successful poll **and** every 1 s clock tick.
-
-1. **Target instant** — `targetDate` + `targetMinutes` in Europe/Berlin.
-2. **Window** — `earliestMs = targetMs − tolerance`, `latestMs = targetMs + tolerance`. Skip the schedule once the whole window is in the past (`latestMs ≤ now`).
-3. **Candidates** — departures in the scheduled quadrant where:
-   - `dep.line === lineFilter` when a line filter is set
-   - `depMs = now + dep.minutes×60s` (raw floor minutes — the +59s offset is only for zoom display alignment, not window matching)
-   - `earliestMs ≤ depMs ≤ latestMs`
-
-   Candidates are sorted by `|depMs − targetMs|` (closest to target first).
-4. **Lock** — when no train is locked yet, lock onto the closest candidate, store its `tripId` as `activeTripId`, and auto-zoom (no minimum-minutes-away gate). Alarm (≤ 7 min) and auto-dismiss (≤ 5 min) behave identically to a manual tap. Zoom also stores `tripId` and rebinds countdown time from live/aged data on each refresh.
-5. **Hold** — once locked, the schedule keeps that train (same `tripId`). It is replaced automatically only when the locked train leaves the window (departs), at which point the next-closest candidate is locked.
-6. **Switch offer** — if a closer train appears while one is locked, a non-blocking bottom toast offers it (no sound). **Switch** locks the offered train and zooms to it; **×** dismisses and suppresses re-offering that same trip. The matcher never switches on its own.
-
-**Example (target 10:03 ± 4):** when a train departing 9:59–10:07 first appears in the API, the zoom opens immediately and locks onto the one nearest 10:03. If a closer one shows up later, the toast offers it but the locked train stays put until you tap Switch. The alarm at ≤ 7 min fires to tell you to leave home.
-
-**Tomorrow example (11 pm → 10:00 ± 4 next day):** save stores `targetDate` = tomorrow. Matcher ignores tonight's departures because their `depMs` is before `earliestMs` on the target day. Fires when a train in `[09:56, 10:04]` first appears next morning.
-
-#### Boundaries and limits
-
-| Topic | Behaviour |
-|-------|-----------|
-| **Persistence** | Browser `localStorage` only; cleared with site data; not synced across devices. |
-| **Horizon** | Practical limit ~24 h (tomorrow rollover). No multi-day scheduling. |
-| **API visibility** | Every departure returned by VBB within the fetch window is matchable. The display shows 3 per quadrant and reveals the rest via horizontal scroll. |
-| **Multiple schedules** | Each evaluated independently; one zoom modal and one switch-offer toast — first match wins. |
-| **Walk time** | Exposed as `walk_time` on `/api/display/data` for dashboard parity; **not** used by the scheduler. |
-
-```mermaid
-flowchart TD
-  subgraph inputs [Inputs each tick]
-    Poll["GET /api/display/data"]
-    LS["localStorage schedules"]
-    Clock["1s clock tick"]
-  end
-
-  subgraph matcher [evaluateSchedules]
-    Target["targetMs from targetDate + targetMinutes"]
-    Window["window: target ± tolerance"]
-    Filter["candidates: quadrant departures (+ lineFilter) in window, sorted by closeness"]
-    Locked{"locked train still in window?"}
-    Closer{"closest candidate ≠ locked?"}
-  end
-
-  subgraph output [Output]
-    Zoom["lock + openZoom → alarm at ≤7 min"]
-    Offer["non-blocking switch toast (no sound)"]
-    Idle["no action"]
-  end
-
-  Poll --> Filter
-  LS --> Target
-  Clock --> Filter
-  Target --> Window
-  Window --> Filter
-  Filter --> Locked
-  Locked -->|"no (first match or departed)"| Zoom
-  Locked -->|yes| Closer
-  Closer -->|yes| Offer
-  Closer -->|no| Idle
-```
-
----
-
-## Setup & run
-
-**Prerequisites:** Python 3.12+, [uv](https://astral.sh/uv), Google Maps API key with Directions API enabled.
-
-```bash
-# Install uv if needed
-curl -LsSf https://astral.sh/uv/install.sh | sh
-
-uv sync
-```
-
-Copy and fill in secrets:
-
-```bash
-cp src/values.example.py src/values.py
-# Set GMAPS_API_KEY in src/values.py
-```
-
-Start the server:
-
-```bash
-python src/app.py
-# http://localhost:5007
-```
-
-Terminal-only view (no server):
-
-```bash
-python src/trainspotter.py
-```
-
-Flask port and VBB API base URL are set in `pyproject.toml` under `[tool.config]`.
+Limits: `localStorage`-only (not synced across devices, cleared with site data), a practical ~24h horizon (schedules can roll to "tomorrow" but not further), and each schedule evaluated independently with one shared zoom modal / switch toast (first match wins). `walk_time` is exposed on `/api/display/data` for dashboard parity but unused by the scheduler.
 
 ---
 
@@ -375,6 +211,41 @@ Flask port and VBB API base URL are set in `pyproject.toml` under `[tool.config]
 | `display.quadrants` | Yes (display) | list[4] | Exactly 4 entries. Each: `key` (str), `label` (str), `lines` (list[str]), `direction` (arrow symbol). Order: top-left, top-right, bottom-left, bottom-right. |
 
 **Direction symbols** for quadrant `direction`: `↑ ↓ ← → ↻ ↺` (↻/↺ map to S41/S42 ring direction logic in `quadrants.compute_direction`).
+
+---
+
+## Setup & run
+
+**Prerequisites:** Python 3.12+, [uv](https://astral.sh/uv), Google Maps API key with Directions API enabled.
+
+```bash
+# Install uv if needed
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+uv sync
+```
+
+Copy and fill in secrets:
+
+```bash
+cp src/values.py.example src/values.py
+# Set GMAPS_API_KEY in src/values.py
+```
+
+Start the server:
+
+```bash
+uv run app
+# http://localhost:5007
+```
+
+Terminal-only view (no server):
+
+```bash
+uv run python src/trainspotter.py
+```
+
+Flask port and VBB API base URL are set in `pyproject.toml` under `[tool.config]`.
 
 ---
 
@@ -529,32 +400,12 @@ Departure
 - No auth required; unofficial API, no SLA.
 - `/locations/nearby` — build-time only (`scripts/fetch_stations.py`)
 - `/stops/{id}/departures` — live departures; retried up to 3× on 5xx, 5 s timeout per attempt
-- Regenerate the local stop list: `python scripts/fetch_stations.py`
+- Regenerate the local stop list: `uv run python scripts/fetch_stations.py`
 
 ### Google Maps Directions API
 - Walking mode only; used when a station has no `walk_time` in `config.json`.
 - Results are joblib disk-cached in `.cache/` (keyed by origin + destination coordinates).
 - Requires `GMAPS_API_KEY` in `src/values.py`.
-
----
-
-## Deployment
-
-### systemd (Raspberry Pi)
-
-```bash
-./install/install.sh
-```
-
-Installs uv, syncs dependencies, installs the systemd service, optionally configures a Cloudflare tunnel.
-
-```bash
-sudo systemctl status projects_trainspotter
-sudo systemctl restart projects_trainspotter
-journalctl -u projects_trainspotter -f
-```
-
-Service file: `install/projects_trainspotter.service`.
 
 ---
 
