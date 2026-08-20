@@ -17,7 +17,7 @@ import requests
 
 from src.config import VBB_API_BASE
 
-OUTPUT_PATH = Path(__file__).resolve().parent.parent / "data" / "vbb_stations.json"
+OUTPUT_PATH = Path(__file__).resolve().parent.parent / "assets" / "vbb_stations.json"
 
 # Bounding box ~greater Berlin; step ~6–7 km so each /nearby call discovers local stops.
 MIN_LAT = 52.38

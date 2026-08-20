@@ -122,7 +122,7 @@ def _load_station_snapshot(path: Path) -> list[dict]:
     return data
 
 
-_STATIONS_PATH = Path(__file__).resolve().parent.parent / "data" / "vbb_stations.json"
+_STATIONS_PATH = Path(__file__).resolve().parent.parent / "assets" / "vbb_stations.json"
 _ALL_STATIONS: list[dict] = _load_station_snapshot(_STATIONS_PATH)
 
 session = requests.Session()

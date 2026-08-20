@@ -20,7 +20,7 @@ trainspotter/
 │   ├── config.py               # Typed config accessors (reads pyproject.toml + config.json); exposes FLASK_PORT
 │   ├── trainspotter.py         # CLI terminal view (standalone, no server)
 │   └── values.py.example       # Template for values.py (git-ignored); set GMAPS_API_KEY here
-├── data/
+├── assets/
 │   └── vbb_stations.json       # Static stop snapshot (~thousands of stops); regenerate with scripts/fetch_stations.py
 ├── scripts/
 │   └── fetch_stations.py       # Builds vbb_stations.json via VBB /locations/nearby grid sweep
@@ -42,7 +42,7 @@ trainspotter/
 
 ## Architecture
 
-Stops come from a **bundled JSON snapshot** (`data/vbb_stations.json`), not from live VBB location queries on each request. At runtime, the server ranks them by haversine distance, filters by `max_nearby_straightline_m`, then calls VBB only for departures.
+Stops come from a **bundled JSON snapshot** (`assets/vbb_stations.json`), not from live VBB location queries on each request. At runtime, the server ranks them by haversine distance, filters by `max_nearby_straightline_m`, then calls VBB only for departures.
 
 ### Build-time: stop snapshot
 
@@ -57,7 +57,7 @@ flowchart LR
   subgraph buildSnapshot [Build snapshot]
     Script[fetch_stations.py]
     VBBnear[VBB GET locations nearby]
-    JsonFile[(data/vbb_stations.json)]
+    JsonFile[(assets/vbb_stations.json)]
     Script -->|grid of lat/lon anchors| VBBnear
     VBBnear -->|stop metadata| Script
     Script -->|write| JsonFile
