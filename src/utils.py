@@ -180,7 +180,6 @@ def process_station_departures(
                 "direction_symbol": direction_symbol,
                 "provenance": cleanse_provenance(departure.destination.name),
                 "wait_time": wait_time,
-                "departure": departure,
             }
         )
 

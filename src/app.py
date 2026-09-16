@@ -51,8 +51,7 @@ def _station_board_row(station: Station, user_coords: tuple[float, float] | None
     """One station's departures and timing metadata for the dashboard JSON."""
     walk_time = get_walk_time(station, user_coords)
     departures = get_inbound_trains(station)
-    processed = process_station_departures(station, departures, user_coords)
-    station_departures = [{k: v for k, v in row.items() if k != "departure"} for row in processed]
+    station_departures = process_station_departures(station, departures, user_coords)
     red_threshold, yellow_threshold = get_thresholds(walk_time) if walk_time is not None else (None, None)
     return {
         "name": station.name,

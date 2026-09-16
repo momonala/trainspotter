@@ -1,179 +1,72 @@
+"""Pydantic models for VBB payloads — only the fields the app consumes; extras are ignored."""
+
 import logging
-from dataclasses import dataclass
 from datetime import datetime
+
+from pydantic import BaseModel
+from pydantic import ConfigDict
+from pydantic import field_validator
 
 logger = logging.getLogger(__name__)
 
 
-@dataclass
-class Location:
-    """Represents a geographic location."""
+class _VBBModel(BaseModel):
+    model_config = ConfigDict(extra="ignore")
 
-    type: str
-    id: str
+
+class Location(_VBBModel):
     latitude: float
     longitude: float
 
 
-@dataclass
-class Products:
-    """Represents available transport products at a station."""
-
+class Products(_VBBModel):
     suburban: bool
-    subway: bool
-    tram: bool
-    bus: bool
-    ferry: bool
-    express: bool
-    regional: bool
 
 
-@dataclass
-class Station:
-    """Represents a public transport station."""
-
-    type: str
+class Station(_VBBModel):
     id: str
     name: str
     location: Location
     products: Products
-    stationDHID: str
-    distance: int
+    distance: int = 0
+
+    @field_validator("name")
+    @classmethod
+    def _strip_berlin_suffix(cls, name: str) -> str:
+        return name.replace("(Berlin)", "")
 
 
-@dataclass
-class Color:
-    """Represents line color information."""
-
-    fg: str
-    bg: str
-
-
-@dataclass
-class Operator:
-    """Represents a transport operator."""
-
-    type: str
-    id: str
+class Line(_VBBModel):
     name: str
-
-
-@dataclass
-class Line:
-    """Represents a transport line."""
-
-    type: str
-    id: str
-    fahrtNr: str
-    name: str
-    public: bool
-    adminCode: str
-    productName: str
-    mode: str
     product: str
-    operator: Operator
-    color: Color | None
 
 
-@dataclass
-class Departure:
-    """Represents an departure at a station."""
-
+class Departure(_VBBModel):
     tripId: str
-    stop: Station
+    stop: Station | None = None
     when: datetime
-    plannedWhen: datetime
-    delay: int | None
-    platform: str | None
-    plannedPlatform: str | None
-    prognosisType: str | None
-    direction: str | None
-    provenance: str
+    provenance: str | None = None
     line: Line
-    remarks: list[str]
-    origin: Station
-    destination: Station | None
-    currentTripPosition: Location | None
-
-
-def _parse_station(station_dict: dict) -> Station:
-    """Helper function to parse a station dictionary into a Station object."""
-    return Station(
-        type=station_dict["type"],
-        id=station_dict["id"],
-        name=station_dict["name"].replace("(Berlin)", ""),
-        location=Location(**station_dict["location"]),
-        products=Products(**station_dict["products"]),
-        stationDHID=station_dict.get("stationDHID", ""),
-        distance=station_dict.get("distance", 0),
-    )
-
-
-def _parse_location(location_dict: dict | None) -> Location | None:
-    """Helper function to parse a location dictionary into a Location object."""
-    if not location_dict:
-        return None
-    return Location(
-        type=location_dict["type"],
-        id=location_dict.get("id", ""),
-        latitude=location_dict["latitude"],
-        longitude=location_dict["longitude"],
-    )
+    destination: Station | None = None
 
 
 def parse_stations(stations_data: list[dict]) -> list[Station]:
-    """Parses a list of station dicts into Station dataclasses."""
-    stations = [_parse_station(station_dict) for station_dict in stations_data]
+    """Parse a list of station dicts into Station models."""
+    stations = [Station.model_validate(station_dict) for station_dict in stations_data]
     logger.debug("Parsed %d stations", len(stations))
     return stations
 
 
 def parse_departures(departures_data: dict) -> list[Departure]:
-    """Parses departures data into Departure dataclasses."""
-    departures: list[Departure] = []
+    """Parse a VBB departures response into Departure models.
+
+    Cancelled trips arrive with `when` set to null — they are skipped.
+    """
+    departures = []
     for departure_dict in departures_data["departures"]:
-        stop = _parse_station(departure_dict["stop"]) if departure_dict["stop"] else None
-        origin = _parse_station(departure_dict["origin"]) if departure_dict["origin"] else None
-        destination = _parse_station(departure_dict["destination"]) if departure_dict["destination"] else None
-        current_trip_position = _parse_location(departure_dict.get("currentTripPosition"))
-
-        line_dict = departure_dict["line"]
-        operator = Operator(**line_dict["operator"]) if "operator" in line_dict else None
-        color = Color(**line_dict["color"]) if "color" in line_dict else None
-
-        line = Line(
-            **{k: v for k, v in line_dict.items() if k not in ["operator", "color"]},
-            operator=operator,
-            color=color,
-        )
-
-        # Cancelled trips arrive with when/plannedWhen set to null — skip them.
-        when_str = departure_dict["when"]
-        planned_when_str = departure_dict["plannedWhen"]
-        if not isinstance(when_str, str) or not isinstance(planned_when_str, str):
-            logger.debug("Skipping departure with invalid 'when': %s or 'plannedWhen': %s", when_str, planned_when_str)
+        if departure_dict.get("when") is None:
+            logger.debug("Skipping departure with null 'when' (cancelled trip): %s", departure_dict.get("tripId"))
             continue
-        when = datetime.fromisoformat(when_str)
-        planned_when = datetime.fromisoformat(planned_when_str)
-
-        departure = Departure(
-            tripId=departure_dict["tripId"],
-            stop=stop,
-            when=when,
-            plannedWhen=planned_when,
-            delay=departure_dict["delay"],
-            platform=departure_dict["platform"],
-            plannedPlatform=departure_dict["plannedPlatform"],
-            prognosisType=departure_dict["prognosisType"],
-            direction=departure_dict["direction"],
-            provenance=departure_dict["provenance"],
-            line=line,
-            remarks=departure_dict["remarks"],
-            origin=origin,
-            destination=destination,
-            currentTripPosition=current_trip_position,
-        )
-        departures.append(departure)
-
+        departures.append(Departure.model_validate(departure_dict))
     logger.debug("Parsed %d departures", len(departures))
     return departures

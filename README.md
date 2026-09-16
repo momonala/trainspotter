@@ -15,7 +15,7 @@ trainspotter/
 │   ├── app.py                  # Flask server, endpoint handlers, threading
 │   ├── vbb_api.py              # Station snapshot loading, haversine ranking, VBB departures client
 │   ├── utils.py                # Walk time lookup, threshold calc, direction/provenance cleansing, Google Maps cache
-│   ├── datamodels.py           # Dataclasses: Station, Departure, Line, Location, Products, Color, Operator
+│   ├── datamodels.py           # Pydantic models: Station, Departure, Line, Location, Products
 │   ├── quadrants.py            # Filter departures by quadrant config, group into QuadrantData
 │   ├── config.py               # Typed config accessors (reads pyproject.toml + config.json); exposes FLASK_PORT
 │   └── values.py.example       # Template for values.py (git-ignored); set GMAPS_API_KEY here
@@ -359,28 +359,23 @@ VBB `product` → displayed type:
 
 ## Data models
 
+Pydantic models over the VBB payloads, keeping only the fields the app consumes (extras ignored):
+
 ```
 Station
 ├── id: str                    # VBB stop ID
-├── name: str
+├── name: str                  # "(Berlin)" suffix stripped on parse
 ├── location: Location         # lat/lon
-├── products: Products         # suburban, subway, tram, bus, ferry, express, regional (bool each)
-├── stationDHID: str
+├── products: Products         # suburban: bool (S-Bahn-first sorting)
 └── distance: int              # meters from user (set at query time)
 
 Departure
 ├── tripId: str
-├── stop: Station
-├── when: datetime             # actual departure (delay applied)
-├── plannedWhen: datetime
-├── delay: int | None          # seconds
-├── platform: str | None
-├── line: Line
-│   ├── name: str              # e.g. "S41"
-│   ├── product: str           # e.g. "suburban"
-│   └── color: Color | None    # fg, bg hex strings
+├── stop: Station | None
+├── when: datetime             # actual departure (delay applied); null → cancelled trip, skipped
+├── line: Line                 # name (e.g. "S41"), product (e.g. "suburban")
 ├── destination: Station | None
-└── provenance: str            # raw destination name from VBB (cleansed in utils.cleanse_provenance)
+└── provenance: str | None     # raw destination name from VBB (cleansed in utils.cleanse_provenance)
 ```
 
 ---

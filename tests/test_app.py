@@ -8,11 +8,9 @@ import pytest
 
 import src.app as app_module
 from src.app import app
-from src.datamodels import Color
 from src.datamodels import Departure
 from src.datamodels import Line
 from src.datamodels import Location
-from src.datamodels import Operator
 from src.datamodels import Products
 from src.datamodels import Station
 from src.vbb_api import VBBAPIError
@@ -37,52 +35,23 @@ def base_now_utc() -> datetime:
 
 @pytest.fixture
 def station_location() -> Location:
-    return Location(type="location", id="loc-1", latitude=52.5, longitude=13.4)
+    return Location(latitude=52.5, longitude=13.4)
 
 
 @pytest.fixture
-def station_products() -> Products:
-    return Products(
-        suburban=True,
-        subway=False,
-        tram=False,
-        bus=False,
-        ferry=False,
-        express=False,
-        regional=False,
-    )
-
-
-@pytest.fixture
-def test_station(station_location: Location, station_products: Products) -> Station:
+def test_station(station_location: Location) -> Station:
     return Station(
-        type="station",
         id="900000100001",
         name="Test Station",
         location=station_location,
-        products=station_products,
-        stationDHID="de:11000:100001",
+        products=Products(suburban=True),
         distance=0,
     )
 
 
 @pytest.fixture
 def suburban_line() -> Line:
-    operator = Operator(type="operator", id="op-1", name="DB")
-    color = Color(fg="#ffffff", bg="#000000")
-    return Line(
-        type="line",
-        id="line-1",
-        fahrtNr="1",
-        name="S41",
-        public=True,
-        adminCode="admin",
-        productName="S-Bahn",
-        mode="train",
-        product="suburban",
-        operator=operator,
-        color=color,
-    )
+    return Line(name="S41", product="suburban")
 
 
 @pytest.fixture
@@ -93,18 +62,9 @@ def departure_factory(test_station: Station, suburban_line: Line):
             tripId="trip-1",
             stop=test_station,
             when=when,
-            plannedWhen=when,
-            delay=None,
-            platform="1",
-            plannedPlatform="1",
-            prognosisType=None,
-            direction="Ringbahn",
             provenance="Gesundbrunnen",
             line=suburban_line,
-            remarks=[],
-            origin=test_station,
             destination=test_station,
-            currentTripPosition=None,
         )
 
     return _build
@@ -128,7 +88,7 @@ def stations_api_departure() -> Mock:
 
 @pytest.fixture
 def stations_api_station() -> Mock:
-    location = Location(type="location", id="loc-1", latitude=52.5, longitude=13.4)
+    location = Location(latitude=52.5, longitude=13.4)
     station = Mock()
     station.name = "Test Station"
     station.distance = 100
