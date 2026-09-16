@@ -91,12 +91,12 @@ def observability():
     return redirect(f"http://{SPYGLASS_HOST}/dashboard/trainspotter")
 
 
-def _user_coords_from_request() -> tuple[float, float] | None:
-    """Coordinates from lat/lon query params, or None to fall back to the config location."""
+def _user_coords_from_request() -> tuple[float, float]:
+    """Coordinates from lat/lon query params, falling back to the config location."""
     lat = request.args.get("lat", type=float)
     lon = request.args.get("lon", type=float)
     if lat is None or lon is None:
-        return None
+        return config["location"]["latitude"], config["location"]["longitude"]
     return round(lat, COORDINATE_ACCURACY_DECIMALS), round(lon, COORDINATE_ACCURACY_DECIMALS)
 
 
@@ -109,7 +109,7 @@ def api_stations():
 
     nearby = get_nearby_stations(user_coords)
     stations = nearby[:max_stations] if max_stations else nearby
-    logger.info("Resolved %d stations for coords %s", len(stations), user_coords or "config default")
+    logger.info("Resolved %d stations for coords %s", len(stations), user_coords)
 
     station_data = _build_station_board_rows(stations, user_coords)
     return jsonify({"stations": station_data})

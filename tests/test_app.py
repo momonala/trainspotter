@@ -132,9 +132,12 @@ def test_api_stations_returns_json(
 
 @patch("src.app.get_nearby_stations", return_value=[])
 def test_api_stations_without_coords_uses_config_fallback(mock_get_stations, client):
+    from src.config import config
+
     response = client.get("/api/stations")
     assert response.status_code == 200
-    mock_get_stations.assert_called_once_with(None)
+    expected = (config["location"]["latitude"], config["location"]["longitude"])
+    mock_get_stations.assert_called_once_with(expected)
 
 
 # =============================================================================
