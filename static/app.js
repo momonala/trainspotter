@@ -27,6 +27,7 @@ const TRANSPORT_LOGOS = {
 // =============================================================================
 
 const state = {
+    coords: null,  // { latitude, longitude } from geolocation, or null → server falls back to config
     lastData: null,
     lastUpdatedAt: null,
     filters: {
@@ -64,8 +65,10 @@ function makeTimeoutSignal(ms) {
     return { signal: controller.signal, cleanup: () => clearTimeout(id) };
 }
 
-async function fetchStations(refresh = false) {
-    const url = refresh ? '/api/stations?refresh=true' : '/api/stations';
+async function fetchStations() {
+    const url = state.coords
+        ? `/api/stations?lat=${state.coords.latitude}&lon=${state.coords.longitude}`
+        : '/api/stations';
     const { signal, cleanup } = makeTimeoutSignal(CONFIG.FETCH_TIMEOUT_MS);
     try {
         const resp = await fetch(url, { signal });
@@ -81,26 +84,17 @@ async function fetchStations(refresh = false) {
     }
 }
 
-async function updateLocation() {
-    if (!('geolocation' in navigator)) return false;
-
+/** Resolve browser geolocation into state.coords; null (config fallback) on denial/error. */
+async function resolveCoordinates() {
+    if (!('geolocation' in navigator)) return;
     try {
         const position = await new Promise((resolve, reject) => {
             navigator.geolocation.getCurrentPosition(resolve, reject);
         });
         const { latitude, longitude } = position.coords;
-        const resp = await fetch('/api/location', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ latitude, longitude })
-        });
-        if (!resp.ok) {
-            throw new Error(`POST /api/location HTTP ${resp.status}`);
-        }
-        return true;
+        state.coords = { latitude, longitude };
     } catch (error) {
         console.error('Error getting location:', error);
-        return false;
     }
 }
 
@@ -442,12 +436,12 @@ window.addEventListener('DOMContentLoaded', async () => {
     const container = document.getElementById('stations-container');
     const refreshButton = document.getElementById('refresh-button');
 
-    async function refreshData(forceRefreshStations = false) {
+    async function refreshData() {
         if (!refreshButton) return;
 
         refreshButton.classList.add('spinning');
         try {
-            const data = await fetchStations(forceRefreshStations);
+            const data = await fetchStations();
             state.lastData = data;
             state.lastUpdatedAt = new Date();
             renderLastUpdated();
@@ -463,7 +457,7 @@ window.addEventListener('DOMContentLoaded', async () => {
 
     async function initialLoad() {
         try {
-            const data = await fetchStations(true);
+            const data = await fetchStations();
             state.lastData = data;
             state.lastUpdatedAt = new Date();
             renderStations(data);
@@ -474,10 +468,8 @@ window.addEventListener('DOMContentLoaded', async () => {
         }
     }
 
-    // Refresh button fetches fresh departures only (same as the poll).
-    // To rediscover stations / walk times, do a full page reload.
     if (refreshButton) {
-        refreshButton.addEventListener('click', () => refreshData(false));
+        refreshButton.addEventListener('click', refreshData);
     }
 
     setInterval(renderLastUpdated, CONFIG.LAST_UPDATED_INTERVAL_MS);
@@ -499,7 +491,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         }
     });
 
-    await updateLocation();
+    await resolveCoordinates();
 
     if (!await initialLoad()) {
         const retrySec = CONFIG.RETRY_DELAY_MS / 1000;

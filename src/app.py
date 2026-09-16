@@ -38,8 +38,8 @@ basedir = Path(__file__).parent.parent
 app = Flask(__name__, template_folder=str(basedir / "templates"), static_folder=str(basedir / "static"))
 logging.getLogger("werkzeug").setLevel(logging.WARNING)
 
-browser_coordinates = None
-cached_stations = None
+# ~111m precision — coarse enough to keep the joblib Google Maps cache hitting
+# for the same effective location across geolocation jitter.
 COORDINATE_ACCURACY_DECIMALS = 3
 
 # Cache-busting version for static assets: stable per process so assets cache
@@ -91,37 +91,27 @@ def observability():
     return redirect(f"http://{SPYGLASS_HOST}/dashboard/trainspotter")
 
 
-@app.route("/api/location", methods=["POST"])
-def api_location():
-    """Receive and log location data from browser."""
-    global browser_coordinates
-    location_data = request.get_json()
-    latitude = location_data.get("latitude")
-    longitude = location_data.get("longitude")
-    browser_coordinates = (
-        round(latitude, COORDINATE_ACCURACY_DECIMALS),
-        round(longitude, COORDINATE_ACCURACY_DECIMALS),
-    )
-    logger.info("Received coordinates %s", browser_coordinates)
-    return jsonify({"status": "success"})
+def _user_coords_from_request() -> tuple[float, float] | None:
+    """Coordinates from lat/lon query params, or None to fall back to the config location."""
+    lat = request.args.get("lat", type=float)
+    lon = request.args.get("lon", type=float)
+    if lat is None or lon is None:
+        return None
+    return round(lat, COORDINATE_ACCURACY_DECIMALS), round(lon, COORDINATE_ACCURACY_DECIMALS)
 
 
 @app.route("/api/stations")
 @metrics.timed("stations")
 def api_stations():
-    """Return station and train data as JSON."""
-    global browser_coordinates, cached_stations
-    refresh = request.args.get("refresh", "false").lower() == "true"
+    """Return nearby stations with live departures as JSON. Stateless: coords come per request."""
+    user_coords = _user_coords_from_request()
     max_stations = config.get("max_dashboard_stations")
 
-    if cached_stations is None or refresh:
-        nearby = get_nearby_stations(browser_coordinates)
-        cached_stations = nearby[:max_stations] if max_stations else nearby
-        logger.info("%s %d stations", "Refreshed" if refresh else "Fetched", len(cached_stations))
-    else:
-        logger.info("Using %d cached stations", len(cached_stations))
+    nearby = get_nearby_stations(user_coords)
+    stations = nearby[:max_stations] if max_stations else nearby
+    logger.info("Resolved %d stations for coords %s", len(stations), user_coords or "config default")
 
-    station_data = _build_station_board_rows(cached_stations, browser_coordinates)
+    station_data = _build_station_board_rows(stations, user_coords)
     return jsonify({"stations": station_data})
 
 

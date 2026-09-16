@@ -6,7 +6,6 @@ from unittest.mock import patch
 
 import pytest
 
-import src.app as app_module
 from src.app import app
 from src.datamodels import Departure
 from src.datamodels import Line
@@ -22,8 +21,6 @@ BASE_TIME_UTC = datetime(2026, 3, 24, 8, 0, 0, tzinfo=timezone.utc)
 @pytest.fixture
 def client():
     app.config["TESTING"] = True
-    app_module.browser_coordinates = None
-    app_module.cached_stations = None
     with app.test_client() as client:
         yield client
 
@@ -107,19 +104,6 @@ def test_index_route(client):
     assert b"<!DOCTYPE html>" in response.data or b"<html" in response.data
 
 
-def test_api_location_post(client):
-    response = client.post("/api/location", json={"latitude": 52.5219, "longitude": 13.4132})
-    assert response.status_code == 200
-    assert response.get_json()["status"] == "success"
-
-
-def test_api_location_rounds_coordinates(client):
-    with patch("src.app.logger") as mock_logger:
-        client.post("/api/location", json={"latitude": 52.521951234, "longitude": 13.413245678})
-        mock_logger.info.assert_called_once()
-        assert "(52.522, 13.413)" in str(mock_logger.info.call_args)
-
-
 @patch("src.utils.get_walk_time", return_value=10)
 @patch("src.app.get_walk_time", return_value=10)
 @patch("src.app.get_nearby_stations")
@@ -136,13 +120,21 @@ def test_api_stations_returns_json(
     mock_get_stations.return_value = [stations_api_station]
     mock_get_trains.return_value = [stations_api_departure]
 
-    client.post("/api/location", json={"latitude": 52.5219, "longitude": 13.4132})
-    response = client.get("/api/stations")
+    response = client.get("/api/stations?lat=52.521951234&lon=13.413245678")
 
     assert response.status_code == 200
     data = response.get_json()
     assert "stations" in data
     assert "gmaps_api_key" not in str(data)
+    # Coords are rounded to 3 decimals before ranking / walk-time lookup
+    mock_get_stations.assert_called_once_with((52.522, 13.413))
+
+
+@patch("src.app.get_nearby_stations", return_value=[])
+def test_api_stations_without_coords_uses_config_fallback(mock_get_stations, client):
+    response = client.get("/api/stations")
+    assert response.status_code == 200
+    mock_get_stations.assert_called_once_with(None)
 
 
 # =============================================================================

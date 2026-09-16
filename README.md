@@ -93,8 +93,7 @@ flowchart TB
   Config --> Api
   Config --> Utils
   Snapshot -->|loaded at import| VbbMod
-  Dashboard -->|POST coords| Api
-  Dashboard -->|GET stations| Api
+  Dashboard -->|GET stations lat/lon| Api
   Display -->|GET display/data| Api
   Display <-->|schedules, mute| LocalStore
   Api --> VbbMod
@@ -112,11 +111,10 @@ flowchart TB
 
 ### Dashboard request flow
 
-1. Browser POSTs coordinates to `/api/location` on geolocation.
-2. First `GET /api/stations?refresh=true` resolves nearby stops from the snapshot and caches them server-side.
+1. Browser resolves geolocation once on load.
+2. Every `GET /api/stations?lat=..&lon=..` resolves nearby stops from the snapshot — stateless, no coords or stop list held server-side (no params → `config.json` location fallback).
 3. Each stop's departures are fetched in parallel (one thread per stop via `ThreadPoolExecutor`).
-4. Walk time comes from `config.json["stations"]` if the station name matches; otherwise Google Maps (joblib disk cache in `.cache/`).
-5. Subsequent polls reuse the cached stop list, re-fetching only departures.
+4. Walk time comes from `config.json["stations"]` if the station name matches; otherwise Google Maps (joblib disk cache in `.cache/`, coords rounded to 3 decimals for stable cache keys).
 
 ```mermaid
 sequenceDiagram
@@ -126,22 +124,14 @@ sequenceDiagram
   participant VBB as VBB departures
   participant GMaps as Google Directions
 
-  Browser->>Flask: POST /api/location {lat, lon}
-  Browser->>Flask: GET /api/stations?refresh=true
-  Flask->>Snapshot: haversine rank within max_nearby_straightline_m
-  loop Each selected stop (up to max_dashboard_stations)
-    Flask->>GMaps: walking duration (if stop not in config.stations)
-    Flask->>VBB: GET /stops/{id}/departures
-  end
-  Flask-->>Browser: {stations, config}
-
-  loop Every 30s or toolbar refresh
-    Browser->>Flask: GET /api/stations
-    Note over Flask: Reuses cached stop list
-    loop Each pinned stop
+  loop Initial load and toolbar refresh
+    Browser->>Flask: GET /api/stations?lat=..&lon=..
+    Flask->>Snapshot: haversine rank within max_nearby_straightline_m
+    loop Each selected stop (up to max_dashboard_stations)
+      Flask->>GMaps: walking duration (if stop not in config.stations; disk-cached)
       Flask->>VBB: GET /stops/{id}/departures
     end
-    Flask-->>Browser: updated departures
+    Flask-->>Browser: {stations}
   end
 ```
 
@@ -251,8 +241,7 @@ Flask port, Spyglass host, and VBB API base URL are set in `config.json`.
 |----------|--------|-------------|
 | `/` | GET | Main dashboard page |
 | `/display` | GET | iPad landscape display page (2×2 quadrant board) |
-| `/api/location` | POST | Set server-side browser coordinates `{latitude, longitude}` |
-| `/api/stations` | GET | Nearby stops with live departures. `?refresh=true` re-resolves stop list. |
+| `/api/stations` | GET | Nearby stops with live departures. `?lat=..&lon=..` sets the user location; omitted → `config.json` fallback. |
 | `/api/display/data` | GET | Quadrant departure data for the fixed display station. Returns 502 if VBB fails. |
 | `/observability` | GET | Redirect to the Spyglass dashboard for this project |
 
