@@ -17,9 +17,9 @@ from spyglass import configure_logging
 from .config import FLASK_PORT
 from .config import PROJECT_NAME
 from .config import SPYGLASS_HOST
+from .config import config
 from .datamodels import Station
 from .quadrants import filter_and_group
-from .utils import config
 from .utils import get_configured_walk_time
 from .utils import get_thresholds
 from .utils import get_walk_time

@@ -1,4 +1,7 @@
 {
+    "flask_port": 5007,
+    "spyglass_host": "localhost:5013",
+    "vbb_api_base": "http://localhost:3000",
     "stations": {
       "gesundbrunnen": { "walk_time": 15 },
       "bornholmer": { "walk_time": 7 }

@@ -9,11 +9,11 @@ from requests.adapters import HTTPAdapter
 from urllib3.util import Retry
 
 from .config import VBB_API_BASE
+from .config import config
 from .datamodels import Departure
 from .datamodels import Station
 from .datamodels import parse_departures
 from .datamodels import parse_stations
-from .utils import config
 
 logger = logging.getLogger(__name__)
 logging.getLogger("urllib3.connectionpool").setLevel(logging.ERROR)

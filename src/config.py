@@ -1,20 +1,24 @@
+"""Single loader for runtime configuration (config.json) and project metadata (pyproject.toml)."""
+
+import json
 import tomllib
 from pathlib import Path
 
 import typer
 
-_config_file = Path(__file__).parent.parent / "pyproject.toml"
-with _config_file.open("rb") as f:
-    _config = tomllib.load(f)
+basedir = Path(__file__).parent.parent
 
-_project_config = _config["project"]
-_tool_config = _config["tool"]["config"]
+with (basedir / "pyproject.toml").open("rb") as f:
+    _project = tomllib.load(f)["project"]
 
-PROJECT_NAME = _project_config["name"]
-PROJECT_VERSION = _project_config["version"]
-FLASK_PORT = _tool_config["flask_port"]
-SPYGLASS_HOST = _tool_config["spyglass_host"]
-VBB_API_BASE = _tool_config["vbb_api_base"].rstrip("/")
+with (basedir / "config.json").open() as f:
+    config = json.load(f)
+
+PROJECT_NAME = _project["name"]
+PROJECT_VERSION = _project["version"]
+FLASK_PORT = config["flask_port"]
+SPYGLASS_HOST = config["spyglass_host"]
+VBB_API_BASE = config["vbb_api_base"].rstrip("/")
 
 
 # fmt: off

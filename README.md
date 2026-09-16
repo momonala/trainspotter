@@ -17,7 +17,7 @@ trainspotter/
 │   ├── utils.py                # Walk time lookup, threshold calc, direction/provenance cleansing, Google Maps cache
 │   ├── datamodels.py           # Pydantic models: Station, Departure, Line, Location, Products
 │   ├── quadrants.py            # Filter departures by quadrant config, group into QuadrantData
-│   ├── config.py               # Typed config accessors (reads pyproject.toml + config.json); exposes FLASK_PORT
+│   ├── config.py               # Single config loader (config.json + pyproject metadata); exposes FLASK_PORT etc
 │   └── values.py.example       # Template for values.py (git-ignored); set GMAPS_API_KEY here
 ├── assets/
 │   └── vbb_stations.json       # Static stop snapshot (~thousands of stops); regenerate with scripts/fetch_stations.py
@@ -198,6 +198,9 @@ Limits: `localStorage`-only (not synced across devices, cleared with site data),
 
 | Field | Required | Type | Description |
 |-------|----------|------|-------------|
+| `flask_port` | Yes | int | Port the Flask server listens on. |
+| `spyglass_host` | Yes | str | Spyglass host for logs/metrics (`host:port`). |
+| `vbb_api_base` | Yes | str | VBB Transport REST base URL. Self-hosted default: `http://localhost:3000`; public mirror: `https://v6.vbb.transport.rest`. |
 | `stations.<name>.walk_time` | No | int (minutes) | Hardcoded walk time; `<name>` is a substring matched against the station's display name (lowercase). Overrides Google Maps. |
 | `walk_time_buffer` | Yes | int (minutes) | Half-width of the yellow zone around walk time. |
 | `location.latitude` / `.longitude` | Yes | float | Fallback coordinates used when no browser geolocation is available. |
@@ -238,7 +241,7 @@ uv run app
 # http://localhost:5007
 ```
 
-Flask port and VBB API base URL are set in `pyproject.toml` under `[tool.config]`.
+Flask port, Spyglass host, and VBB API base URL are set in `config.json`.
 
 ---
 
@@ -255,7 +258,7 @@ Flask port and VBB API base URL are set in `pyproject.toml` under `[tool.config]
 
 ### Observability (Spyglass)
 
-Metrics and logs are sent to a [Spyglass](https://github.com/momonala/spyglass) server (`spyglass_host` in `pyproject.toml`). Dashboard: `/observability` → `{spyglass_host}/dashboard/trainspotter`.
+Metrics and logs are sent to a [Spyglass](https://github.com/momonala/spyglass) server (`spyglass_host` in `config.json`). Dashboard: `/observability` → `{spyglass_host}/dashboard/trainspotter`.
 
 Stat names are prefixed as `trainspotter.{caller_function}.{stat}`.
 
@@ -382,7 +385,7 @@ Departure
 ## External dependencies
 
 ### VBB Transport REST API
-- Base URL: `vbb_api_base` in `pyproject.toml` (`[tool.config]`). Default: `http://localhost:3000`; for the public mirror use `https://v6.vbb.transport.rest`.
+- Base URL: `vbb_api_base` in `config.json`. Default: `http://localhost:3000`; for the public mirror use `https://v6.vbb.transport.rest`.
 - No auth required; unofficial API, no SLA.
 - `/locations/nearby` — build-time only (`scripts/fetch_stations.py`)
 - `/stops/{id}/departures` — live departures; retried up to 3× on 5xx, 5 s timeout per attempt

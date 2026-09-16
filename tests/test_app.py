@@ -208,7 +208,7 @@ def test_api_display_data_departures_include_trip_id(mock_departures, mock_filte
 
 @patch("src.app.get_departures", return_value=[])
 def test_api_display_data_quadrant_keys_match_config(mock_departures, client):
-    from src.utils import config
+    from src.config import config
 
     expected_keys = [q["key"] for q in config["display"]["quadrants"]]
     response = client.get("/api/display/data")

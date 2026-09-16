@@ -1,26 +1,22 @@
 """Shared utility functions for trainspotter."""
 
-import json
 import logging
 import math
 from datetime import datetime
 from datetime import timezone
-from pathlib import Path
 
 import googlemaps
 from joblib import Memory
 
+from .config import basedir
+from .config import config
 from .datamodels import Departure
 from .datamodels import Station
 from .values import GMAPS_API_KEY
 
 logger = logging.getLogger(__name__)
 
-basedir = Path(__file__).parent.parent
 disk_cache = Memory(str(basedir / ".cache"), verbose=0)
-
-with (basedir / "config.json").open() as f:
-    config = json.load(f)
 
 
 @disk_cache.cache
