@@ -18,7 +18,6 @@ trainspotter/
 │   ├── datamodels.py           # Dataclasses: Station, Departure, Line, Location, Products, Color, Operator
 │   ├── quadrants.py            # Filter departures by quadrant config, group into QuadrantData
 │   ├── config.py               # Typed config accessors (reads pyproject.toml + config.json); exposes FLASK_PORT
-│   ├── trainspotter.py         # CLI terminal view (standalone, no server)
 │   └── values.py.example       # Template for values.py (git-ignored); set GMAPS_API_KEY here
 ├── assets/
 │   └── vbb_stations.json       # Static stop snapshot (~thousands of stops); regenerate with scripts/fetch_stations.py
@@ -237,12 +236,6 @@ Start the server:
 ```bash
 uv run app
 # http://localhost:5007
-```
-
-Terminal-only view (no server):
-
-```bash
-uv run python src/trainspotter.py
 ```
 
 Flask port and VBB API base URL are set in `pyproject.toml` under `[tool.config]`.

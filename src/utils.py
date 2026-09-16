@@ -94,16 +94,6 @@ def cleanse_transport_type(departure: Departure) -> str:
     return _TRANSPORT_TYPE_BY_PRODUCT.get(departure.line.product.lower(), "other")
 
 
-def get_platform_group(station_name: str, platform: str, transport_type: str) -> str:
-    """Get the platform group for stations with combined platforms."""
-    if "bornholmer" in station_name.lower() and transport_type == "S-Bahn":
-        if platform in ["1", "2"]:
-            return "1 & 2"
-        elif platform in ["3", "4"]:
-            return "3 & 4"
-    return platform
-
-
 def cleanse_provenance(provenance: str, max_length: int = 28) -> str:
     """Cleanse the provenance string."""
     if "Hauptbahnhof" in provenance:
