@@ -12,6 +12,7 @@ from .config import basedir
 from .config import config
 from .datamodels import Departure
 from .datamodels import Station
+from .directions import compute_direction
 from .values import GMAPS_API_KEY
 
 logger = logging.getLogger(__name__)
@@ -110,34 +111,6 @@ def cleanse_provenance(provenance: str, max_length: int = 28) -> str:
     return provenance[:max_length].strip()
 
 
-def get_initial_bearing(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    """Initial great-circle bearing in degrees (0–360) from point 1 to point 2."""
-    lat1, lon1, lat2, lon2 = map(math.radians, [lat1, lon1, lat2, lon2])
-    d_lon = lon2 - lon1
-    x = math.sin(d_lon) * math.cos(lat2)
-    y = math.cos(lat1) * math.sin(lat2) - math.sin(lat1) * math.cos(lat2) * math.cos(d_lon)
-    return (math.degrees(math.atan2(x, y)) + 360) % 360
-
-
-def bearing_to_cardinal(bearing: float) -> str:
-    directions = ["↑", "→", "↓", "←"]
-    return directions[round(bearing / 90) % len(directions)]
-
-
-def get_direction(line: str, direction: str) -> str:
-    """Get the platform direction with emoji for specific stations."""
-    if line == "S41":
-        return "↻"
-    elif line == "S42":
-        return "↺"
-    elif direction in ["→", "↓"] and line in ["S8", "S85"]:
-        return "↻"
-    elif direction == "←" and line == "S1":
-        return "↓"
-    else:
-        return direction
-
-
 def process_station_departures(
     station: Station, departures: list[Departure], browser_coordinates: tuple[float, float] | None = None
 ) -> list[dict]:
@@ -151,16 +124,9 @@ def process_station_departures(
 
     processed = []
     for departure in departures:
-        if not departure.stop or not departure.stop.location:
+        direction_symbol = compute_direction(departure)
+        if direction_symbol is None:
             continue
-        if not departure.destination or not departure.destination.location:
-            continue
-
-        start = departure.stop.location
-        stop = departure.destination.location
-        bearing = get_initial_bearing(start.latitude, start.longitude, stop.latitude, stop.longitude)
-        cardinal = bearing_to_cardinal(bearing)
-        direction_symbol = get_direction(departure.line.name, cardinal)
 
         minutes_until = int((departure.when - now).total_seconds() / 60)
         wait_time = minutes_until - (walk_time or 0)

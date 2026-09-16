@@ -14,7 +14,8 @@ trainspotter/
 ├── src/
 │   ├── app.py                  # Flask server, endpoint handlers, threading
 │   ├── vbb_api.py              # Station snapshot loading, haversine ranking, VBB departures client
-│   ├── utils.py                # Walk time lookup, threshold calc, direction/provenance cleansing, Google Maps cache
+│   ├── utils.py                # Walk time lookup, threshold calc, provenance cleansing, Google Maps cache
+│   ├── directions.py           # Bearing math + per-line direction arrow heuristics (S41/S42 ring etc)
 │   ├── datamodels.py           # Pydantic models: Station, Departure, Line, Location, Products
 │   ├── quadrants.py            # Filter departures by quadrant config, group into QuadrantData
 │   ├── config.py               # Single config loader (config.json + pyproject metadata); exposes FLASK_PORT etc
@@ -202,7 +203,7 @@ Limits: `localStorage`-only (not synced across devices, cleared with site data),
 | `display.station_name` | Yes (display) | str | Display name shown in the header of the display page. |
 | `display.quadrants` | Yes (display) | list[4] | Exactly 4 entries. Each: `key` (str), `label` (str), `lines` (list[str]), `direction` (arrow symbol). Order: top-left, top-right, bottom-left, bottom-right. |
 
-**Direction symbols** for quadrant `direction`: `↑ ↓ ← → ↻ ↺` (↻/↺ map to S41/S42 ring direction logic in `quadrants.compute_direction`).
+**Direction symbols** for quadrant `direction`: `↑ ↓ ← → ↻ ↺` (↻/↺ map to S41/S42 ring direction logic in `directions.compute_direction`).
 
 ---
 

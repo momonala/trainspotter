@@ -4,9 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from .datamodels import Departure
-from .utils import bearing_to_cardinal
-from .utils import get_direction
-from .utils import get_initial_bearing
+from .directions import compute_direction
 
 
 @dataclass(frozen=True)
@@ -27,16 +25,6 @@ class QuadrantData:
     label: str
     arrow: str
     departures: list[DepartureSlot]
-
-
-def compute_direction(dep: Departure) -> str | None:
-    """Return direction symbol (↑ ↓ ↻ ↺ ← →) from departure bearing and line, or None if unknown."""
-    if not dep.stop or not dep.stop.location or not dep.destination or not dep.destination.location:
-        return None
-    start = dep.stop.location
-    end = dep.destination.location
-    bearing = get_initial_bearing(start.latitude, start.longitude, end.latitude, end.longitude)
-    return get_direction(dep.line.name, bearing_to_cardinal(bearing))
 
 
 def filter_and_group(

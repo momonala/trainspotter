@@ -4,11 +4,11 @@ import pytest
 
 from src.datamodels import Departure
 from src.datamodels import Line
-from src.utils import bearing_to_cardinal
+from src.directions import bearing_to_cardinal
+from src.directions import get_direction
+from src.directions import get_initial_bearing
 from src.utils import cleanse_provenance
 from src.utils import cleanse_transport_type
-from src.utils import get_direction
-from src.utils import get_initial_bearing
 from src.utils import get_thresholds
 
 
