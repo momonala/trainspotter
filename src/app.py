@@ -122,7 +122,7 @@ def api_stations():
         logger.info("Using %d cached stations", len(cached_stations))
 
     station_data = _build_station_board_rows(cached_stations, browser_coordinates)
-    return jsonify({"stations": station_data, "config": config})
+    return jsonify({"stations": station_data})
 
 
 @app.route("/api/display/data")

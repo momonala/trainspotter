@@ -27,7 +27,6 @@ const TRANSPORT_LOGOS = {
 // =============================================================================
 
 const state = {
-    config: null,
     lastData: null,
     lastUpdatedAt: null,
     filters: {
@@ -74,9 +73,7 @@ async function fetchStations(refresh = false) {
         if (!resp.ok) {
             throw new Error(`HTTP error! status: ${resp.status}`);
         }
-        const data = await resp.json();
-        state.config = data.config;
-        return data;
+        return await resp.json();
     } catch (error) {
         cleanup();
         console.error(`Error fetching stations: ${describeFetchError(error, url)}`, error);

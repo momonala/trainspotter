@@ -142,7 +142,7 @@ def test_api_stations_returns_json(
     assert response.status_code == 200
     data = response.get_json()
     assert "stations" in data
-    assert "config" in data
+    assert "gmaps_api_key" not in str(data)
 
 
 # =============================================================================

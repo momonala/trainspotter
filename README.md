@@ -291,8 +291,7 @@ VBB upstream errors are logged at WARNING with `error.kind` for log search in Sp
         "yellowThreshold": 17
       }
     }
-  ],
-  "config": { ... }
+  ]
 }
 ```
 

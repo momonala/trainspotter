@@ -22,13 +22,10 @@ disk_cache = Memory(str(basedir / ".cache"), verbose=0)
 with (basedir / "config.json").open() as f:
     config = json.load(f)
 
-# Secret comes from git-ignored values.py, never from config.json.
-config["gmaps_api_key"] = GMAPS_API_KEY
-
 
 @disk_cache.cache
 def _get_walk_time_gmaps(origin: tuple[float, float], destination: tuple[float, float], station_name: str) -> int:
-    gmaps = googlemaps.Client(key=config["gmaps_api_key"])
+    gmaps = googlemaps.Client(key=GMAPS_API_KEY)
     result = gmaps.directions(origin=origin, destination=destination, mode="walking")
     duration_sec = result[0]["legs"][0]["duration"]["value"]
     duration_min = duration_sec / 60
