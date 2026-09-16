@@ -6,19 +6,14 @@ from pathlib import Path
 
 import requests
 from requests.adapters import HTTPAdapter
-from spyglass import MetricsCollector
 from urllib3.util import Retry
 
-from .config import PROJECT_NAME
-from .config import SPYGLASS_HOST
 from .config import VBB_API_BASE
 from .datamodels import Departure
 from .datamodels import Station
 from .datamodels import parse_departures
 from .datamodels import parse_stations
 from .utils import config
-
-metrics = MetricsCollector(host=SPYGLASS_HOST, project=PROJECT_NAME)
 
 logger = logging.getLogger(__name__)
 logging.getLogger("urllib3.connectionpool").setLevel(logging.ERROR)

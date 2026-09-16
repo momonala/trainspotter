@@ -257,13 +257,12 @@ Flask port and VBB API base URL are set in `pyproject.toml` under `[tool.config]
 
 Metrics and logs are sent to a [Spyglass](https://github.com/momonala/spyglass) server (`spyglass_host` in `pyproject.toml`). Dashboard: `/observability` → `{spyglass_host}/dashboard/trainspotter`.
 
-Stat names are prefixed as `trainspotter.{caller_function}.{stat}`. VBB failures use tags for dashboard breakdown (`kind` on `vbb.error`, `outcome` on `vbb.fetch`).
+Stat names are prefixed as `trainspotter.{caller_function}.{stat}`.
 
 | Stat | Type | When |
 |------|------|------|
-| `vbb.success` | counter | Departures HTTP fetch succeeded |
-| `vbb.error` | counter | Departures fetch failed (`tags: {kind: http_503 \| timeout \| …}`) |
-| `vbb.fetch` | timing | Upstream HTTP latency (`tags: {outcome: ok \| error}`) |
+| `stations` | timing | `GET /api/stations` handler latency |
+| `display_data` | timing | `GET /api/display/data` handler latency |
 | `response.502` | counter | Display hard error (`tags: {route: display_data}`) |
 
 VBB upstream errors are logged at WARNING with `error.kind` for log search in Spyglass.

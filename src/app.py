@@ -42,10 +42,9 @@ browser_coordinates = None
 cached_stations = None
 COORDINATE_ACCURACY_DECIMALS = 3
 
-
-def _asset_version() -> int:
-    """Cache-busting version for static assets, to avoid stale iOS caches."""
-    return int(datetime.now(timezone.utc).timestamp())
+# Cache-busting version for static assets: stable per process so assets cache
+# between page loads, but stale iOS caches bust on every deploy/restart.
+ASSET_VERSION = int(datetime.now(timezone.utc).timestamp())
 
 
 def _station_board_row(station: Station, user_coords: tuple[float, float] | None) -> dict:
@@ -78,13 +77,13 @@ def _build_station_board_rows(
 @app.route("/")
 def index():
     """Render the main page."""
-    return render_template("index.html", asset_version=_asset_version())
+    return render_template("index.html", asset_version=ASSET_VERSION)
 
 
 @app.route("/display")
 def display():
     """Render the iPad display page."""
-    return render_template("display.html", asset_version=_asset_version())
+    return render_template("display.html", asset_version=ASSET_VERSION)
 
 
 @app.route("/observability")

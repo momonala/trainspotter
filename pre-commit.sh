@@ -1,15 +1,15 @@
 #!/bin/bash
-# Pre-commit hook to run tests, black, and ruff
+# Pre-commit hook to run tests and ruff
 
 set -e
 
 echo "🧪 Running tests..."
 uv run pytest
 
-echo "🖤 Running black..."
-if ! uv run black . --check; then
-    echo "❌ Black found formatting issues. To auto fix, run:"
-    echo -e "\033[32muv run black .\033[0m"
+echo "🖤 Running ruff format..."
+if ! uv run ruff format . --check; then
+    echo "❌ Ruff found formatting issues. To auto fix, run:"
+    echo -e "\033[32muv run ruff format .\033[0m"
     exit 1
 fi
 

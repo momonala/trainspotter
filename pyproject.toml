@@ -13,15 +13,16 @@ dependencies = [
     "urllib3>=2.0.0",
     "googlemaps>=4.10.0",
     "joblib>=1.0.0,<2.0.0",
-    "pytest>=8.0.0",
-    "pytest-cov>=4.0.0",
-    "black",
-    "ruff>=0.14.10",
-    "isort>=7.0.0",
     "typer>=0.9.0",
-    "freezegun>=1.5.5",
     "spyglass",
     "pydantic>=2.13.4",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-cov>=4.0.0",
+    "ruff>=0.14.10",
 ]
 
 [tool.config]
@@ -42,17 +43,15 @@ packages = ["src"]
 app = "src.app:main"
 config = "src.config:main"
 
-[tool.isort]
-force_single_line = true
-
 [tool.ruff]
 line-length = 120
 target-version = "py312"
 
-[tool.black]
-line-length = 120
-target-version = ['py312']
-include = '\.pyi?$'
+[tool.ruff.lint]
+extend-select = ["I"]
+
+[tool.ruff.lint.isort]
+force-single-line = true
 
 [tool.mypy]
 python_version = "3.12"
