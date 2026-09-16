@@ -156,7 +156,7 @@ sequenceDiagram
   loop Every 30s
     Display->>Flask: fetch quadrant data
     Flask->>VBB: departures for display.station_id
-    Flask-->>Display: quadrants with key, minutes, line
+    Flask-->>Display: quadrants with key, when, line
     Display->>Display: renderQuadrants + evaluateSchedules
   end
 
@@ -301,8 +301,8 @@ VBB upstream errors are logged at WARNING with `error.kind` for log search in Sp
       "label": "S1/26",
       "arrow": "↑",
       "departures": [
-        { "tripId": "1|123|0|80|1012025", "minutes": 7,  "line": "S1",  "provenance": "Oranienburg" },
-        { "tripId": "1|456|0|80|1012025", "minutes": 14, "line": "S26", "provenance": "Teltow Stadt" }
+        { "tripId": "1|123|0|80|1012025", "when": "2026-05-21T10:43:00+02:00", "line": "S1",  "provenance": "Oranienburg" },
+        { "tripId": "1|456|0|80|1012025", "when": "2026-05-21T10:50:00+02:00", "line": "S26", "provenance": "Teltow Stadt" }
       ]
     },
     {
@@ -315,7 +315,7 @@ VBB upstream errors are logged at WARNING with `error.kind` for log search in Sp
       "key": "s8_up",
       "label": "S8/85",
       "arrow": "↑",
-      "departures": [{ "tripId": "1|789|0|80|1012025", "minutes": 11, "line": "S8", "provenance": "Birkenwerder" }]
+      "departures": [{ "tripId": "1|789|0|80|1012025", "when": "2026-05-21T10:47:00+02:00", "line": "S8", "provenance": "Birkenwerder" }]
     },
     {
       "key": "s8_clockwise",
@@ -331,7 +331,7 @@ VBB upstream errors are logged at WARNING with `error.kind` for log search in Sp
 |-------|---------|
 | `quadrants[].key` | Schedule matcher — ties a reminder to a quadrant (`display.quadrants[].key` in config). |
 | `quadrants[].departures[].tripId` | VBB/HAFAS trip identity — schedule lock and zoom rebind across polls/delays. |
-| `quadrants[].departures[].minutes` | Floor minutes until departure; matcher adds 59 s to align with zoom modal. |
+| `quadrants[].departures[].when` | ISO departure timestamp; the client derives displayed minutes from it on every clock tick. |
 | `walk_time` | Dashboard parity only; scheduler does not use it (leave-home is the zoom alarm). |
 
 ### `transport_type` normalisation

@@ -173,13 +173,14 @@ def test_api_display_data_departures_include_trip_id(mock_departures, mock_filte
     from src.quadrants import DepartureSlot
     from src.quadrants import QuadrantData
 
+    when = datetime(2026, 3, 24, 8, 10, 0, tzinfo=timezone.utc)
     mock_filter.return_value = [
         QuadrantData(
             key="s1_26_up",
             label="S1/26",
             arrow="↑",
             departures=[
-                DepartureSlot(tripId="trip-abc", minutes=10, line="S1", provenance="Oranienburg"),
+                DepartureSlot(tripId="trip-abc", when=when, line="S1", provenance="Oranienburg"),
             ],
         ),
         QuadrantData(key="s1_26_down", label="S1/26", arrow="↓", departures=[]),
@@ -192,7 +193,7 @@ def test_api_display_data_departures_include_trip_id(mock_departures, mock_filte
     dep = response.get_json()["quadrants"][0]["departures"][0]
     assert dep == {
         "tripId": "trip-abc",
-        "minutes": 10,
+        "when": "2026-03-24T08:10:00+00:00",
         "line": "S1",
         "provenance": "Oranienburg",
     }

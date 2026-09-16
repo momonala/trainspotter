@@ -87,7 +87,7 @@ def test_filter_and_group_includes_departures_above_min_minutes(now):
     assert slot.tripId == "trip-s1-10"
     assert slot.line == "S1"
     assert slot.provenance == "Endstation"
-    assert 9 <= slot.minutes <= 11
+    assert slot.when == dep.when
 
 
 def test_filter_and_group_rejects_missing_trip_id(now):
@@ -123,8 +123,8 @@ def test_filter_and_group_sorts_by_soonest(now):
     with pytest.MonkeyPatch().context() as mp:
         mp.setattr("src.quadrants.compute_direction", lambda _: "↑")
         result = filter_and_group(deps, now, QUADRANTS_CONFIG, min_minutes=5, max_per_quadrant=2)
-    minutes_list = [s.minutes for s in result[0].departures]
-    assert minutes_list == sorted(minutes_list)
+    whens = [s.when for s in result[0].departures]
+    assert whens == sorted(whens)
     assert result[0].departures[0].tripId == "trip-soon"
 
 
@@ -146,7 +146,7 @@ def test_filter_and_group_routes_by_direction(now):
 
 
 def test_quadrant_data_dataclass():
-    slot = DepartureSlot(tripId="trip-1", minutes=7, line="S1", provenance="Oranienburg")
+    slot = DepartureSlot(tripId="trip-1", when=datetime.now(timezone.utc), line="S1", provenance="Oranienburg")
     q = QuadrantData(key="s1_up", label="S1/26", arrow="↑", departures=[slot])
     assert q.key == "s1_up"
     assert q.label == "S1/26"

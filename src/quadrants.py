@@ -14,7 +14,7 @@ class DepartureSlot:
     """One catchable departure in a quadrant, keyed by VBB/HAFAS tripId."""
 
     tripId: str
-    minutes: int
+    when: datetime
     line: str
     provenance: str
 
@@ -81,7 +81,7 @@ def filter_and_group(
                 groups[key].append(
                     DepartureSlot(
                         tripId=dep.tripId,
-                        minutes=minutes,
+                        when=dep.when,
                         line=line,
                         provenance=dep.provenance,
                     )
@@ -89,7 +89,7 @@ def filter_and_group(
                 break
 
     for key in groups:
-        ordered = sorted(groups[key], key=lambda s: s.minutes)
+        ordered = sorted(groups[key], key=lambda s: s.when)
         groups[key] = ordered[:max_per_quadrant] if max_per_quadrant is not None else ordered
 
     return [

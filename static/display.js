@@ -26,7 +26,6 @@ const DIRECTION_LABELS = {
     '↺': 'Counter',
 };
 
-const FLOOR_MINUTES_OFFSET_MS = 59_000;
 const WHEEL_ITEM_PX = 60; // keep in sync with --schedule-wheel-item-height in display.css
 const BERLIN_TZ = 'Europe/Berlin';
 const OVERLAY_CLOSE_MS = 200;
@@ -51,7 +50,6 @@ const state = {
     lastUpdatedAt: null,
     quadrantsByKey: new Map(),
     lastRenderedSnapshot: null,
-    lastAgedElapsedMin: null,
     lastError: null,
 };
 
@@ -200,52 +198,51 @@ async function fetchDisplayData() {
 }
 
 // =============================================================================
-// Stale-data aging (client-side when polls fail or between refreshes)
+// View model — minutes derived from departure timestamps on every tick
 // =============================================================================
+
+/** Epoch ms of a departure's `when` ISO timestamp. */
+function departureMs(dep) {
+    return Date.parse(dep.when);
+}
+
+/** Whole minutes until a departure (floored, like the badge shows). */
+function departureMinutes(dep, nowMs = Date.now()) {
+    return Math.floor((departureMs(dep) - nowMs) / 60_000);
+}
+
+/**
+ * Quadrants with computed `minutes`, dropping trains that are no longer
+ * catchable (same min_departure_min gate as the server applies at fetch time).
+ */
+function currentQuadrants(nowMs = Date.now()) {
+    const minMinutes = state.lastData?.min_departure_min ?? 5;
+    return (state.lastData?.quadrants ?? []).map(q => ({
+        ...q,
+        departures: (q.departures ?? [])
+            .map(dep => ({ ...dep, minutes: departureMinutes(dep, nowMs) }))
+            .filter(dep => dep.minutes >= minMinutes),
+    }));
+}
 
 /** JSON snapshot of quadrant departures — used to skip redundant re-renders. */
 function departuresSnapshot(quadrants) {
     return JSON.stringify(
-        (quadrants ?? []).map(q =>
-            (q.departures ?? []).map(dep => `${dep.tripId}:${dep.minutes}`),
-        ),
+        quadrants.map(q => (q.departures ?? []).map(dep => `${dep.tripId}:${dep.minutes}`)),
     );
 }
 
-/**
- * Shift floor-minute departures forward by elapsed time since last fetch and
- * drop trains that are no longer catchable (same min_departure_min gate as server).
- */
-function ageDisplayData(data, fetchedAtMs, nowMs = Date.now()) {
-    if (!data || fetchedAtMs == null) return data;
+/** Re-render the grid whenever any departure's displayed minutes changed. */
+function renderCurrentIfChanged() {
+    if (!state.lastData) return;
 
-    const elapsedMin = Math.floor((nowMs - fetchedAtMs) / 60_000);
-    const minMinutes = data.min_departure_min ?? 5;
-
-    const quadrants = (data.quadrants ?? []).map(q => ({
-        ...q,
-        departures: (q.departures ?? [])
-            .map(dep => ({ ...dep, minutes: dep.minutes - elapsedMin }))
-            .filter(dep => dep.minutes >= minMinutes),
-    }));
-
-    return { ...data, quadrants };
-}
-
-function renderAgedQuadrantsIfNeeded(nowMs = Date.now()) {
-    if (!state.lastData || state.lastUpdatedAt == null) return;
-
-    const elapsedMin = Math.floor((nowMs - state.lastUpdatedAt) / 60_000);
-    if (elapsedMin === state.lastAgedElapsedMin) return;
-
-    const aged = ageDisplayData(state.lastData, state.lastUpdatedAt, nowMs);
-    const snapshot = departuresSnapshot(aged.quadrants);
-    state.lastAgedElapsedMin = elapsedMin;
+    const quadrants = currentQuadrants();
+    const snapshot = departuresSnapshot(quadrants);
     if (snapshot === state.lastRenderedSnapshot) return;
 
-    rebuildQuadrantIndex(aged);
     state.lastRenderedSnapshot = snapshot;
-    renderQuadrants(aged);
+    rebuildQuadrantIndex(quadrants);
+    renderQuadrants({ ...state.lastData, quadrants });
     syncZoomDeparture();
 }
 
@@ -463,11 +460,6 @@ function syncVbbWarning() {
     }
 }
 
-/** Floor-minute departures need +59s so Math.floor matches the badge on open. */
-function departureMsFromFloorMinutes(dep, nowMs = Date.now()) {
-    return nowMs + dep.minutes * 60_000 + FLOOR_MINUTES_OFFSET_MS;
-}
-
 /** Find a departure across all quadrants by VBB tripId. */
 function findDepartureByTripId(tripId) {
     if (!tripId) return null;
@@ -479,21 +471,21 @@ function findDepartureByTripId(tripId) {
 }
 
 /**
- * Keep zoom countdown aligned with live (or aged) data for the locked trip.
- * Called after refresh and after client-side aging rebuilds the quadrant index.
+ * Keep zoom countdown aligned with live data for the locked trip.
+ * Called after each render rebuilds the quadrant index.
  */
 function syncZoomDeparture() {
     if (!zoom.active || !zoom.tripId) return;
     const dep = findDepartureByTripId(zoom.tripId);
     if (!dep) return;
-    zoom.departureTime = departureMsFromFloorMinutes(dep);
+    zoom.departureTime = departureMs(dep);
 }
 
 function openZoom(dep, arrow) {
     unlockAudio();  // must happen inside tap handler so iOS allows audio
     zoom.active = true;
     zoom.tripId = dep.tripId;
-    zoom.departureTime = departureMsFromFloorMinutes(dep);
+    zoom.departureTime = departureMs(dep);
     zoom.alarmArmed = dep.minutes > 7;      // arm alarm threshold (7 min)
     zoom.autoCloseArmed = dep.minutes > 5;  // arm auto-dismiss threshold (5 min)
 
@@ -559,10 +551,11 @@ function closeZoom() {
 // Rendering
 // =============================================================================
 
-/** Format minutes as a clock time by adding them to now. */
-function minutesToClockTime(minutes) {
-    const t = new Date(Date.now() + minutes * 60_000);
-    return t.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+/** Format a departure's timestamp as a Berlin clock time. */
+function departureClockTime(dep) {
+    return new Date(departureMs(dep)).toLocaleTimeString('de-DE', {
+        timeZone: BERLIN_TZ, hour: '2-digit', minute: '2-digit',
+    });
 }
 
 /** Build a single departure badge element. */
@@ -573,7 +566,7 @@ function createDepartureBadge(dep, delay, arrow) {
 
     const clock = document.createElement('span');
     clock.className = 'departure-clock';
-    clock.textContent = minutesToClockTime(dep.minutes);
+    clock.textContent = departureClockTime(dep);
 
     const mins = document.createElement('span');
     mins.className = 'departure-minutes';
@@ -782,8 +775,8 @@ function closeDiagnosticsModal() {
 // Data loop
 // =============================================================================
 
-function rebuildQuadrantIndex(data) {
-    state.quadrantsByKey = new Map((data?.quadrants ?? []).map(q => [q.key, q]));
+function rebuildQuadrantIndex(quadrants) {
+    state.quadrantsByKey = new Map(quadrants.map(q => [q.key, q]));
 }
 
 async function refresh() {
@@ -793,20 +786,16 @@ async function refresh() {
         const data = await fetchDisplayData();
         state.lastData = data;
         state.lastError = null;
-        rebuildQuadrantIndex(data);
         warnedMissingQuadrantKeys.clear();
         state.lastUpdatedAt = Date.now();
-        state.lastAgedElapsedMin = null;
-        state.lastRenderedSnapshot = departuresSnapshot(data.quadrants);
-        renderQuadrants(data);
-        syncZoomDeparture();
+        state.lastRenderedSnapshot = null;  // force a render with the fresh data
+        renderCurrentIfChanged();
         console.info(`[refresh] updated — station: ${data.station_name}`);
     } catch (err) {
         const copy = describeDisplayFetchError(err);
         recordFetchError(err, copy);
         state.lastData = null;
         state.quadrantsByKey = new Map();
-        state.lastAgedElapsedMin = null;
         state.lastRenderedSnapshot = null;
         showError(copy);
     } finally {
@@ -828,7 +817,7 @@ window.addEventListener('DOMContentLoaded', () => {
         updateClock();
         updateDisplayStatus();
         updateZoomDisplay();
-        renderAgedQuadrantsIfNeeded();
+        renderCurrentIfChanged();
         evaluateSchedules();
     }, DISPLAY_CONFIG.CLOCK_INTERVAL_MS);
 
@@ -1459,7 +1448,6 @@ function candidatesForSchedule(schedule, quadrant, nowCalMin) {
     const out = [];
     for (const dep of (quadrant.departures ?? [])) {
         if (schedule.lineFilter && dep.line !== schedule.lineFilter) continue;
-        // Use raw floor minutes (no +59s) for window bounds — the offset is only for zoom display alignment.
         const dist = Math.abs(nowCalMin + dep.minutes - targetCalMin);
         if (dist > tolerance) continue;
         out.push({ dep, dist });
@@ -1549,11 +1537,8 @@ function showSwitchOffer(schedule, dep, tripId) {
 
     switchOffer = { scheduleId: schedule.id, key: tripId };
 
-    const timeStr = new Date(departureMsFromFloorMinutes(dep)).toLocaleTimeString('de-DE', {
-        hour: '2-digit', minute: '2-digit',
-    });
     const labelEl = document.getElementById('switch-offer-label');
-    if (labelEl) labelEl.textContent = `${dep.line} · ${timeStr}`;
+    if (labelEl) labelEl.textContent = `${dep.line} · ${departureClockTime(dep)}`;
 
     const acceptBtn = document.getElementById('switch-offer-accept');
     if (acceptBtn) acceptBtn.onclick = () => acceptSwitchOffer(schedule.id, dep, tripId);

@@ -168,7 +168,7 @@ def api_display_data():
                         "departures": [
                             {
                                 "tripId": d.tripId,
-                                "minutes": d.minutes,
+                                "when": d.when.isoformat(),
                                 "line": d.line,
                                 "provenance": d.provenance,
                             }
