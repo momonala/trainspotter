@@ -986,26 +986,22 @@ function nextRepeatDate(repeatDays, targetMinutes) {
     throw new Error(`nextRepeatDate: repeatDays is empty or unreachable`);
 }
 
-function berlinTargetMs(targetDate, targetMinutes) {
-    const [year, month, day] = targetDate.split('-').map(Number);
-    const hour = Math.floor(targetMinutes / 60);
-    const minute = targetMinutes % 60;
-    // Scan ±3h around the naïve UTC equivalent to cover CET (+1) and CEST (+2).
-    const naiveUtcMs = Date.UTC(year, month - 1, day, hour, minute, 0);
-    for (let ms = naiveUtcMs - 3 * 3600_000; ms <= naiveUtcMs + 3 * 3600_000; ms += 60_000) {
-        const p = berlinParts(new Date(ms));
-        if (p.year === year && p.month === month && p.day === day && p.hours === hour && p.minutes === minute) {
-            return ms;
-        }
-    }
-    throw new Error(`Unresolved Berlin target: ${targetDate} ${hour}:${minute}`);
+/** Days since epoch for a 'YYYY-MM-DD' string — pure calendar arithmetic, no timezones. */
+function calendarDays(dateStr) {
+    const [year, month, day] = dateStr.split('-').map(Number);
+    return Date.UTC(year, month - 1, day) / 86_400_000;
 }
 
-function scheduleTargetMs(schedule) {
+/** Absolute Berlin wall-clock position in calendar minutes: days × 1440 + minutes-of-day. */
+function calendarMinutes(dateStr, minutesOfDay) {
+    return calendarDays(dateStr) * 1440 + minutesOfDay;
+}
+
+function scheduleTargetCalendarMinutes(schedule) {
     const targetDate = schedule.repeatDays?.length
         ? nextRepeatDate(schedule.repeatDays, schedule.targetMinutes)
         : schedule.targetDate;
-    return berlinTargetMs(targetDate, schedule.targetMinutes);
+    return calendarMinutes(targetDate, schedule.targetMinutes);
 }
 
 function loadSchedules() {
@@ -1448,23 +1444,25 @@ function saveSchedule() {
  *
  * Target time = the train you want (e.g. 10:03).
  * Window = [target − tolerance, target + tolerance].
+ *
+ * All comparisons happen in Berlin calendar minutes — the domain schedules are
+ * defined in — so no wall-clock → epoch conversion is needed. Around a DST
+ * change this can be off by up to an hour (twice a year, ~3am).
  */
-function candidatesForSchedule(schedule, quadrant, nowMs) {
-    const targetMs = scheduleTargetMs(schedule);
+function candidatesForSchedule(schedule, quadrant, nowCalMin) {
+    const targetCalMin = scheduleTargetCalendarMinutes(schedule);
     const tolerance = schedule.toleranceMinutes ?? SCHEDULE_CONFIG.DEFAULT_TOLERANCE_MIN;
-    const earliestMs = targetMs - tolerance * 60_000;
-    const latestMs = targetMs + tolerance * 60_000;
 
     // The whole ± window has already passed — nothing left to catch.
-    if (latestMs <= nowMs) return [];
+    if (targetCalMin + tolerance <= nowCalMin) return [];
 
     const out = [];
     for (const dep of (quadrant.departures ?? [])) {
         if (schedule.lineFilter && dep.line !== schedule.lineFilter) continue;
-        // Use raw floor time (no +59s) for window bounds — the offset is only for zoom display alignment.
-        const depMs = nowMs + dep.minutes * 60_000;
-        if (depMs < earliestMs || depMs > latestMs) continue;
-        out.push({ dep, dist: Math.abs(depMs - targetMs) });
+        // Use raw floor minutes (no +59s) for window bounds — the offset is only for zoom display alignment.
+        const dist = Math.abs(nowCalMin + dep.minutes - targetCalMin);
+        if (dist > tolerance) continue;
+        out.push({ dep, dist });
     }
     out.sort((a, b) => a.dist - b.dist);
     return out.map(c => c.dep);
@@ -1483,7 +1481,7 @@ function candidatesForSchedule(schedule, quadrant, nowMs) {
 function evaluateSchedules() {
     if (!state.lastData || schedules.length === 0) return;
 
-    const nowMs = Date.now();
+    const nowCalMin = calendarMinutes(berlinDateString(), berlinNowMinutes());
 
     for (const schedule of schedules) {
         const quadrant = state.quadrantsByKey.get(schedule.quadrantKey);
@@ -1495,7 +1493,7 @@ function evaluateSchedules() {
             continue;
         }
 
-        const candidates = candidatesForSchedule(schedule, quadrant, nowMs);
+        const candidates = candidatesForSchedule(schedule, quadrant, nowCalMin);
 
         if (candidates.length === 0) {
             schedule.activeTripId = null;
