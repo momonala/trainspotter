@@ -6,7 +6,6 @@ from tabulate import tabulate
 
 from .datamodels import Departure
 from .utils import cleanse_transport_type
-from .utils import get_direction
 from .utils import get_platform_group
 from .utils import get_thresholds
 from .utils import get_walk_time
@@ -16,12 +15,12 @@ from .vbb_api import get_nearby_stations
 logger = logging.getLogger(__name__)
 
 
-def get_platform_number(platform: str) -> int:
-    """Get the platform number for sorting."""
+def get_platform_number(platform: str) -> float:
+    """Platform number for sorting; unknown platforms sort last."""
     try:
         return int(platform)
     except ValueError:
-        return float("inf")  # Put unknown platforms at the end
+        return float("inf")
 
 
 def get_time_color(minutes_until: int, walk_time: int | None) -> str:
@@ -47,7 +46,7 @@ def main() -> None:
 
     for station in stations:
         print("\n" + "=" * 100)
-        walk_time = get_walk_time(station.name)
+        walk_time = get_walk_time(station)
         print(f"🚉 {station.name} ({station.distance}m away)")
         if walk_time is not None:
             print(f"   {walk_time} minute walk")
@@ -58,52 +57,32 @@ def main() -> None:
             print("No departures found")
             continue
 
-        # Group departures by transport type and platform
         departures_by_type: dict[str, dict[str, list[Departure]]] = {}
         for departure in departures:
             transport_type = cleanse_transport_type(departure)
-            if transport_type == "other":  # Skip ferry, express, regional
+            if transport_type == "other":
                 continue
 
             platform = departure.platform or "?"
             platform_group = get_platform_group(station.name, platform, transport_type)
+            departures_by_type.setdefault(transport_type, {}).setdefault(platform_group, []).append(departure)
 
-            # Initialize nested dictionaries if needed
-            if transport_type not in departures_by_type:
-                departures_by_type[transport_type] = {}
-            if platform_group not in departures_by_type[transport_type]:
-                departures_by_type[transport_type][platform_group] = []
-
-            departures_by_type[transport_type][platform_group].append(departure)
-
-        # Print tables for each transport type and platform
         for transport_type, platforms in sorted(departures_by_type.items()):
             print(f"\n{transport_type.upper()}")
             print("-" * 100)
 
-            # Sort platforms numerically
             for platform in sorted(platforms.keys(), key=get_platform_number):
-                direction_symbol = get_direction(station.name, platform, transport_type)
-                platform_header = f"Platform {platform}"
-                if direction_symbol:
-                    platform_header = f"{direction_symbol} {platform_header}"
-                print(f"\n{platform_header}")
+                print(f"\nPlatform {platform}")
 
-                # Sort departures by time
-                platform_departures = sorted(platforms[platform], key=lambda x: x.when)
-
-                # Create and print the table
-                headers = ["Time", "Line", "To"]
+                now = datetime.now(timezone.utc)
                 rows = []
-                for departure in platform_departures:
-                    now = datetime.now(timezone.utc)
+                for departure in sorted(platforms[platform], key=lambda x: x.when):
                     minutes_away = int((departure.when - now).total_seconds() / 60)
                     color = get_time_color(minutes_away, walk_time)
                     time_str = f"{departure.when.strftime('%H:%M')} ({minutes_away}m)"
-
                     rows.append([f"{color}{time_str}\033[0m", departure.line.name, departure.provenance])
 
-                print(tabulate(rows, headers=headers, tablefmt="simple"))
+                print(tabulate(rows, headers=["Time", "Line", "To"], tablefmt="simple"))
 
 
 if __name__ == "__main__":

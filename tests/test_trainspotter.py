@@ -55,11 +55,8 @@ def test_main_no_stations(mock_print, mock_get_stations):
 @patch("src.trainspotter.get_nearby_stations")
 @patch("src.trainspotter.get_inbound_trains")
 @patch("src.trainspotter.get_walk_time")
-@patch("src.trainspotter.get_direction")
 @patch("builtins.print")
-def test_main_with_stations_and_departures(
-    mock_print, mock_direction, mock_walk_time, mock_get_trains, mock_get_stations
-):
+def test_main_with_stations_and_departures(mock_print, mock_walk_time, mock_get_trains, mock_get_stations):
     mock_station = Station(
         type="stop",
         id="900000100001",
@@ -80,7 +77,6 @@ def test_main_with_stations_and_departures(
     mock_departure.provenance = "Ringbahn"
     mock_get_trains.return_value = [mock_departure]
     mock_walk_time.return_value = 10
-    mock_direction.return_value = "↻"
 
     from src.trainspotter import main
 

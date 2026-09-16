@@ -38,10 +38,14 @@ basedir = Path(__file__).parent.parent
 app = Flask(__name__, template_folder=str(basedir / "templates"), static_folder=str(basedir / "static"))
 logging.getLogger("werkzeug").setLevel(logging.WARNING)
 
-# Global state
 browser_coordinates = None
 cached_stations = None
 COORDINATE_ACCURACY_DECIMALS = 3
+
+
+def _asset_version() -> int:
+    """Cache-busting version for static assets, to avoid stale iOS caches."""
+    return int(datetime.now(timezone.utc).timestamp())
 
 
 def _station_board_row(station: Station, user_coords: tuple[float, float] | None) -> dict:
@@ -74,16 +78,13 @@ def _build_station_board_rows(
 @app.route("/")
 def index():
     """Render the main page."""
-    # Add cache-busting version for static assets to avoid stale iOS caches
-    asset_version = int(datetime.now(timezone.utc).timestamp())
-    return render_template("index.html", asset_version=asset_version)
+    return render_template("index.html", asset_version=_asset_version())
 
 
 @app.route("/display")
 def display():
     """Render the iPad display page."""
-    asset_version = int(datetime.now(timezone.utc).timestamp())
-    return render_template("display.html", asset_version=asset_version)
+    return render_template("display.html", asset_version=_asset_version())
 
 
 @app.route("/observability")

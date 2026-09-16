@@ -124,7 +124,7 @@ def _parse_location(location_dict: dict | None) -> Location | None:
 def parse_stations(stations_data: list[dict]) -> list[Station]:
     """Parses a list of station dicts into Station dataclasses."""
     stations = [_parse_station(station_dict) for station_dict in stations_data]
-    logger.debug(f"Parsed {len(stations)} stations")
+    logger.debug("Parsed %d stations", len(stations))
     return stations
 
 
@@ -132,13 +132,11 @@ def parse_departures(departures_data: dict) -> list[Departure]:
     """Parses departures data into Departure dataclasses."""
     departures: list[Departure] = []
     for departure_dict in departures_data["departures"]:
-        # Parse nested objects
         stop = _parse_station(departure_dict["stop"]) if departure_dict["stop"] else None
         origin = _parse_station(departure_dict["origin"]) if departure_dict["origin"] else None
         destination = _parse_station(departure_dict["destination"]) if departure_dict["destination"] else None
         current_trip_position = _parse_location(departure_dict.get("currentTripPosition"))
 
-        # Parse line and its nested objects
         line_dict = departure_dict["line"]
         operator = Operator(**line_dict["operator"]) if "operator" in line_dict else None
         color = Color(**line_dict["color"]) if "color" in line_dict else None
@@ -149,16 +147,15 @@ def parse_departures(departures_data: dict) -> list[Departure]:
             color=color,
         )
 
-        # Defensive: check 'when' and 'plannedWhen' are strings
+        # Cancelled trips arrive with when/plannedWhen set to null — skip them.
         when_str = departure_dict["when"]
         planned_when_str = departure_dict["plannedWhen"]
         if not isinstance(when_str, str) or not isinstance(planned_when_str, str):
-            logger.debug(f"Skipping departure with invalid 'when': {when_str} or 'plannedWhen': {planned_when_str}")
+            logger.debug("Skipping departure with invalid 'when': %s or 'plannedWhen': %s", when_str, planned_when_str)
             continue
         when = datetime.fromisoformat(when_str)
         planned_when = datetime.fromisoformat(planned_when_str)
 
-        # Create departure object
         departure = Departure(
             tripId=departure_dict["tripId"],
             stop=stop,
@@ -178,5 +175,5 @@ def parse_departures(departures_data: dict) -> list[Departure]:
         )
         departures.append(departure)
 
-    logger.debug(f"Parsed {len(departures)} departures")
+    logger.debug("Parsed %d departures", len(departures))
     return departures

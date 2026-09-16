@@ -375,15 +375,16 @@ body::before {
     text-align: center;
 }
 
-/* Line chip — BVG colour, reuses .line-S1 etc from styles.css */
-.departure-line-chip {
+/* Line chip — BVG colour, reuses .line-S1 etc from styles.css.
+   Compound selector outranks the .line-badge sizing rules in styles.css. */
+.line-badge.departure-line-chip {
     flex: 0 0 auto;
-    font-size: 26px !important;
-    font-weight: 700 !important;
-    padding: 4px 12px !important;
-    border-radius: var(--d-radius-chip) !important;
+    font-size: 26px;
+    font-weight: 700;
+    padding: 4px 12px;
+    border-radius: var(--d-radius-chip);
     letter-spacing: 0.1px;
-    min-width: 0 !important;
+    min-width: 0;
     white-space: nowrap;
 }
 
@@ -526,13 +527,14 @@ body::before {
     font-family: 'SF Pro Display', -apple-system, sans-serif;
 }
 
-/* BVG line chip — inherits colour from .line-S1 etc */
-.modal-line-chip {
-    font-size: 52px !important;
-    font-weight: 700 !important;
-    padding: 10px 28px !important;
-    border-radius: 16px !important;
-    min-width: 0 !important;
+/* BVG line chip — inherits colour from .line-S1 etc.
+   Compound selector outranks the .line-badge sizing rules in styles.css. */
+.line-badge.modal-line-chip {
+    font-size: 52px;
+    font-weight: 700;
+    padding: 10px 28px;
+    border-radius: 16px;
+    min-width: 0;
     letter-spacing: 0.2px;
     white-space: nowrap;
 }
@@ -1077,7 +1079,7 @@ body::before {
     :root { --d-header-h: 36px; }
 
     .departure-minutes { font-size: 53px; letter-spacing: -2px; }
-    .departure-line-chip { font-size: 14px !important; padding: 2px 7px !important; }
+    .line-badge.departure-line-chip { font-size: 14px; padding: 2px 7px; }
     .departure-badge { padding: 3px 4px; gap: 6px; max-width: 140px; }
     .quadrant { padding: 4px 6px 4px; }
     .quadrant-label { font-size: 44px; }
@@ -1089,7 +1091,7 @@ body::before {
 /* Larger landscape (iPad Pro / desktop preview) */
 @media (orientation: landscape) and (min-height: 900px) {
     .departure-minutes { font-size: 115px; }
-    .departure-line-chip { font-size: 32px !important; padding: 5px 16px !important; }
+    .line-badge.departure-line-chip { font-size: 32px; padding: 5px 16px; }
     .departure-badge { max-width: 230px; padding: 6px 6px; gap: 10px; }
     .quadrant { padding: 8px 12px 6px; }
     .quadrant-label { font-size: 128px; }

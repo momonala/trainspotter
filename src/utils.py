@@ -16,16 +16,13 @@ from .values import GMAPS_API_KEY
 
 logger = logging.getLogger(__name__)
 
-# Cache in parent directory
 basedir = Path(__file__).parent.parent
 disk_cache = Memory(str(basedir / ".cache"), verbose=0)
 
-# Load config from parent directory (secrets from git-ignored values.py)
-config_path = basedir / "config.json"
-with open(config_path, "r") as f:
+with (basedir / "config.json").open() as f:
     config = json.load(f)
 
-
+# Secret comes from git-ignored values.py, never from config.json.
 config["gmaps_api_key"] = GMAPS_API_KEY
 
 
@@ -55,17 +52,19 @@ def get_configured_walk_time(station_name: str) -> int | None:
 
 
 def get_walk_time(station: Station, current_coordinates: tuple[float, float] | None = None) -> int | None:
-    """Get configured walk time for a station."""
+    """Walk time to a station: from config when the station is configured, else via Google Maps.
+
+    Raises:
+        ValueError: If the station is not configured and no current coordinates were given.
+    """
     walk_time = get_configured_walk_time(station.name)
     if walk_time is not None:
         logger.debug("Station %s is configured with walk time %d minutes", station.name, walk_time)
         return walk_time
-    else:
-        destination_coordinates = (round(station.location.latitude, 4), round(station.location.longitude, 4))
-        assert (
-            current_coordinates and destination_coordinates
-        ), f"{current_coordinates=} and {destination_coordinates=} are required if Station not configured"
-        return _get_walk_time_gmaps(current_coordinates, destination_coordinates, station.name)
+    if current_coordinates is None:
+        raise ValueError(f"current_coordinates required for unconfigured station {station.name!r}")
+    destination_coordinates = (round(station.location.latitude, 4), round(station.location.longitude, 4))
+    return _get_walk_time_gmaps(current_coordinates, destination_coordinates, station.name)
 
 
 def get_thresholds(walk_time: int) -> tuple[int, int]:
@@ -80,20 +79,19 @@ def get_thresholds(walk_time: int) -> tuple[int, int]:
     return red_threshold, yellow_threshold
 
 
+_TRANSPORT_TYPE_BY_PRODUCT = {
+    "suburban": "S-Bahn",
+    "subway": "U-Bahn",
+    "tram": "Tram",
+    "bus": "Bus",
+    "regional": "DB",
+    "express": "DB",
+}
+
+
 def cleanse_transport_type(departure: Departure) -> str:
-    """Get the transport type for an departure."""
-    product = departure.line.product.lower()
-    if product == "suburban":
-        return "S-Bahn"
-    elif product == "subway":
-        return "U-Bahn"
-    elif product == "tram":
-        return "Tram"
-    elif product == "bus":
-        return "Bus"
-    elif product == "regional" or product == "express":
-        return "DB"  # Deutsche Bahn regional trains
-    return "other"
+    """Map a departure's VBB product to a display transport type."""
+    return _TRANSPORT_TYPE_BY_PRODUCT.get(departure.line.product.lower(), "other")
 
 
 def get_platform_group(station_name: str, platform: str, transport_type: str) -> str:
@@ -129,23 +127,18 @@ def cleanse_provenance(provenance: str, max_length: int = 28) -> str:
     return provenance[:max_length].strip()
 
 
-def get_initial_bearing(lat1, lon1, lat2, lon2):
-    # Convert to radians
+def get_initial_bearing(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Initial great-circle bearing in degrees (0–360) from point 1 to point 2."""
     lat1, lon1, lat2, lon2 = map(math.radians, [lat1, lon1, lat2, lon2])
     d_lon = lon2 - lon1
-
     x = math.sin(d_lon) * math.cos(lat2)
     y = math.cos(lat1) * math.sin(lat2) - math.sin(lat1) * math.cos(lat2) * math.cos(d_lon)
-
-    initial_bearing = math.atan2(x, y)
-    bearing_degrees = (math.degrees(initial_bearing) + 360) % 360
-    return bearing_degrees
+    return (math.degrees(math.atan2(x, y)) + 360) % 360
 
 
-def bearing_to_cardinal(bearing):
+def bearing_to_cardinal(bearing: float) -> str:
     directions = ["↑", "→", "↓", "←"]
-    idx = round(bearing / 90) % len(directions)
-    return directions[idx]
+    return directions[round(bearing / 90) % len(directions)]
 
 
 def get_direction(line: str, direction: str) -> str:
@@ -197,7 +190,7 @@ def process_station_departures(
                 "direction_symbol": direction_symbol,
                 "provenance": cleanse_provenance(departure.destination.name),
                 "wait_time": wait_time,
-                "departure": departure,  # Keep reference to original Departure object
+                "departure": departure,
             }
         )
 

@@ -161,19 +161,17 @@ function renderLastUpdated() {
 // UI Helpers
 // =============================================================================
 
+/** Replay the split-flap flip animation on all table rows. */
 function triggerRowAnimation() {
-    // Add animation class to all table rows for split-flap flip effect
     const rows = document.querySelectorAll('.platform-table tbody tr');
     rows.forEach(row => {
-        // Remove class first to reset animation if already present
         row.classList.remove('row-updated');
-        // Force reflow to restart animation
-        void row.offsetWidth;
+        void row.offsetWidth;  // force reflow so the animation restarts
         row.classList.add('row-updated');
     });
-    
-    // Remove animation class after all flips complete (to allow re-triggering)
-    // Max delay is 750ms + 400ms animation = ~1150ms
+
+    // Remove the class once all flips complete (max delay 750ms + 400ms animation)
+    // so the next refresh can re-trigger it.
     setTimeout(() => {
         rows.forEach(row => row.classList.remove('row-updated'));
     }, 1500);
@@ -191,7 +189,6 @@ function getTimeClass(minutesUntil, timeConfig) {
 }
 
 function createLineBadge(line) {
-    // Use cached badge if available
     const cacheKey = line.replace(/[^A-Z0-9]/g, '');
     if (lineBadgeCache[cacheKey]) {
         return lineBadgeCache[cacheKey].cloneNode(true);
@@ -245,8 +242,7 @@ function filterDeparture(departure, walkTime) {
 function createStationTable(departures, timeConfig, walkTime) {
     const table = document.createElement('table');
     table.className = 'platform-table';
-    
-    // Header
+
     const thead = document.createElement('thead');
     const headerRow = document.createElement('tr');
     ['', 'Line', '', 'Time', 'In', 'Wait', 'Direction'].forEach(col => {
@@ -258,52 +254,42 @@ function createStationTable(departures, timeConfig, walkTime) {
     thead.appendChild(headerRow);
     table.appendChild(thead);
     
-    // Body
     const tbody = document.createElement('tbody');
 
-    // Filter departures based on user filters
     const filteredDepartures = departures.filter(departure => filterDeparture(departure, walkTime));
 
     filteredDepartures.forEach(departure => {
         const row = document.createElement('tr');
-        
-        // Calculate time class
+
         const whenDate = new Date(departure.when);
         const minutesUntil = Math.floor((whenDate - new Date()) / (1000 * 60));
         row.className = getTimeClass(minutesUntil, timeConfig);
-        
-        // Transport type logo column
+
         const typeCell = document.createElement('td');
         typeCell.appendChild(createTransportLogo(departure.transport_type));
         row.appendChild(typeCell);
 
-        // Line column
         const lineCell = document.createElement('td');
         lineCell.appendChild(createLineBadge(departure.line));
         row.appendChild(lineCell);
 
-        // Direction emoji column
         const emojiCell = document.createElement('td');
         emojiCell.textContent = departure.direction_symbol;
         row.appendChild(emojiCell);
 
-        // Time column (HH:MM)
         const timeCell = document.createElement('td');
         timeCell.textContent = whenDate.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
         row.appendChild(timeCell);
 
-        // Minutes until column
         const minsCell = document.createElement('td');
         minsCell.textContent = `${minutesUntil}m`;
         row.appendChild(minsCell);
 
-        // Wait time column
         const waitCell = document.createElement('td');
         waitCell.textContent = `${departure.wait_time}m`;
         waitCell.className = departure.wait_time < 0 ? 'negative-wait' : '';
         row.appendChild(waitCell);
 
-        // Direction column
         const dirCell = document.createElement('td');
         dirCell.textContent = departure.provenance;
         row.appendChild(dirCell);
@@ -352,8 +338,7 @@ function renderStations(data) {
     navList.innerHTML = '';
 
     renderLastUpdated();
-    
-    // Create navigation items
+
     data.stations.forEach((station, idx) => {
         const navItem = document.createElement('li');
         navItem.className = 'station-nav-item';
@@ -367,7 +352,7 @@ function renderStations(data) {
             : station.name;
         
         navItem.addEventListener('click', () => {
-            document.querySelectorAll('.station-nav-item').forEach((item, i) => {
+            document.querySelectorAll('.station-nav-item').forEach(item => {
                 item.classList.toggle('active', item === navItem);
                 item.setAttribute('aria-selected', item === navItem ? 'true' : 'false');
             });
@@ -381,23 +366,19 @@ function renderStations(data) {
         navList.appendChild(navItem);
     });
     
-    // Create station sections
     data.stations.forEach((station, idx) => {
         const section = document.createElement('section');
         section.className = 'station-section';
         section.dataset.stationId = idx;
-        
-        // Create header container
+
         const headerContainer = document.createElement('div');
         headerContainer.className = 'station-header-container';
-        
-        // Add station name
+
         const stationName = document.createElement('h2');
         stationName.className = 'station-header';
         stationName.textContent = station.name;
         headerContainer.appendChild(stationName);
-        
-        // Add walk time if available
+
         if (station.walkTime != null) {
             const walkTimeEl = document.createElement('div');
             walkTimeEl.className = 'station-walk-time';
@@ -407,7 +388,6 @@ function renderStations(data) {
 
         section.appendChild(headerContainer);
 
-        // Add table with all departures
         const table = createStationTable(station.departures, station.timeConfig, station.walkTime);
         section.appendChild(table);
         
@@ -438,7 +418,6 @@ function renderStations(data) {
         }
     };
 
-    // Create debounced scroll handler
     let scrollTimeout;
     scrollHandler = () => {
         clearTimeout(scrollTimeout);
@@ -471,14 +450,11 @@ window.addEventListener('DOMContentLoaded', async () => {
 
         refreshButton.classList.add('spinning');
         try {
-            // Pass refresh flag to control station list refresh
             const data = await fetchStations(forceRefreshStations);
             state.lastData = data;
             state.lastUpdatedAt = new Date();
             renderLastUpdated();
             renderStations(data);
-            
-            // Trigger row sweep animation after render
             triggerRowAnimation();
         } catch (error) {
             console.error('Error during refresh:', error);
@@ -507,10 +483,8 @@ window.addEventListener('DOMContentLoaded', async () => {
         refreshButton.addEventListener('click', () => refreshData(false));
     }
 
-    // Update "last updated" display every second
     setInterval(renderLastUpdated, CONFIG.LAST_UPDATED_INTERVAL_MS);
 
-    // Set up filter handlers
     const filterConfig = [
         { id: 'transportFilter', key: 'transport' },
         { id: 'directionFilter', key: 'direction' },

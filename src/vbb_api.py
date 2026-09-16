@@ -16,6 +16,7 @@ from .datamodels import Departure
 from .datamodels import Station
 from .datamodels import parse_departures
 from .datamodels import parse_stations
+from .utils import config
 
 metrics = MetricsCollector(host=SPYGLASS_HOST, project=PROJECT_NAME)
 
@@ -103,10 +104,6 @@ def _classify_request_exception(exc: requests.RequestException) -> tuple[str, in
         return "connection", None
     return "unknown", None
 
-
-# Load configuration
-with open("config.json", "r") as f:
-    config = json.load(f)
 
 _MAX_STRAIGHTLINE_DISTANCE_M = float(config.get("max_nearby_straightline_m", 1500))
 

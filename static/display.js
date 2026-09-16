@@ -497,11 +497,9 @@ function openZoom(dep, arrow) {
     zoom.alarmArmed = dep.minutes > 7;      // arm alarm threshold (7 min)
     zoom.autoCloseArmed = dep.minutes > 5;  // arm auto-dismiss threshold (5 min)
 
-    // Arrow
     const arrowEl = document.getElementById('modal-arrow');
     if (arrowEl) arrowEl.textContent = arrow ?? '';
 
-    // Line chip
     const lineKey = dep.line.replace(/[^A-Z0-9]/g, '');
     const chipEl = document.getElementById('modal-line-chip');
     if (chipEl) {
@@ -603,7 +601,6 @@ function createQuadrant(quadrant, quadrantIndex) {
     el.className = 'quadrant';
     el.setAttribute('aria-label', `${quadrant.label} ${quadrant.arrow}`);
 
-    // Header: arrow + label
     const header = document.createElement('div');
     header.className = 'quadrant-header';
 
@@ -619,7 +616,6 @@ function createQuadrant(quadrant, quadrantIndex) {
     header.append(arrow, label);
     el.appendChild(header);
 
-    // Departures row
     const row = document.createElement('div');
     row.className = 'departures-row';
 
@@ -676,7 +672,6 @@ function showError(copy) {
     if (!grid) return;
     grid.innerHTML = '';
 
-    // Single card spanning all four grid cells
     const card = document.createElement('div');
     card.className = 'error-card';
     card.setAttribute('role', 'alert');
@@ -837,7 +832,6 @@ window.addEventListener('DOMContentLoaded', () => {
         evaluateSchedules();
     }, DISPLAY_CONFIG.CLOCK_INTERVAL_MS);
 
-    // Restore mute state on load
     const muteBtn = document.getElementById('mute-btn');
     if (muteBtn) {
         muteBtn.classList.toggle('muted', muted);
@@ -846,15 +840,12 @@ window.addEventListener('DOMContentLoaded', () => {
         muteBtn.addEventListener('click', toggleMute);
     }
 
-    // Close zoom modal on backdrop click
     document.getElementById('modal-overlay')?.addEventListener('click', e => {
         if (e.target === e.currentTarget) closeZoom();
     });
 
-    // Close zoom modal on close button click
     document.getElementById('modal-close-btn')?.addEventListener('click', closeZoom);
 
-    // Close modals on Escape
     document.addEventListener('keydown', e => {
         if (e.key === 'Escape') {
             closeZoom();
@@ -873,18 +864,15 @@ window.addEventListener('DOMContentLoaded', () => {
         if (e.target === e.currentTarget) closeDiagnosticsModal();
     });
 
-    // Schedule button
     document.getElementById('schedule-btn')?.addEventListener('click', () => {
         unlockAudio();  // user gesture — unlock audio for future auto-zoom alarms
         openScheduleModal();
     });
 
-    // Schedule modal backdrop click
     document.getElementById('schedule-overlay')?.addEventListener('click', e => {
         if (e.target === e.currentTarget) closeScheduleModal();
     });
 
-    // Schedule modal cancel / save
     document.getElementById('schedule-cancel-btn')?.addEventListener('click', closeScheduleModal);
     document.getElementById('schedule-save-btn')?.addEventListener('click', saveSchedule);
 
@@ -894,10 +882,8 @@ window.addEventListener('DOMContentLoaded', () => {
         hideSwitchOffer();
     });
 
-    // Initial schedule badge render from localStorage
     renderScheduleBadges();
 
-    // Initial load then recurring poll
     refresh();
     setInterval(refresh, DISPLAY_CONFIG.REFRESH_INTERVAL_MS);
 });
@@ -1375,7 +1361,6 @@ function openScheduleModal(editId = null) {
     if (saveBtn) saveBtn.textContent = editing ? 'Update' : 'Save';
     // validateRoute() (called via buildRouteWheels) sets the final disabled state.
 
-    // Build wheels
     const hourWheel = document.getElementById('schedule-wheel-hour');
     const minWheel = document.getElementById('schedule-wheel-minute');
     if (hourWheel) fillWheel(hourWheel, numberWheelLabels(24, 2));
