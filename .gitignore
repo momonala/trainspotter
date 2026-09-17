@@ -95,3 +95,6 @@ static/*.html
 .ipython/
 .cursor/
 .claude/
+
+# Local deploy helper (host-specific, never committed)
+deploy.py
