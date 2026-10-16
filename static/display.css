@@ -221,19 +221,26 @@ body::before {
     transform: scale(0.93);
 }
 
-/* ── 2×2 grid ─────────────────────────────────────────────── */
+/* ── 2-row grid, two columns per screen, swipe for more ──── */
 
 .display-grid {
     flex: 1;
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-auto-flow: column;
     grid-template-rows: 1fr 1fr;
+    grid-auto-columns: calc((100% - 1px) / 2);
     /* 1px gap acts as divider lines; grid background provides the colour */
     gap: 1px;
     background: var(--d-grid-divider);
-    overflow: hidden;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scroll-snap-type: x mandatory;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
     min-height: 0;
 }
+
+.display-grid::-webkit-scrollbar { display: none; }
 
 /* ── Quadrant cards ───────────────────────────────────────── */
 
@@ -248,6 +255,12 @@ body::before {
     overflow: hidden;
     box-shadow: inset 0 1px 0 var(--d-glass-shine);
     transition: background 0.3s ease;
+    scroll-snap-align: start;
+}
+
+.quadrant--filler {
+    background: #000;
+    box-shadow: none;
 }
 
 .quadrant--loading {

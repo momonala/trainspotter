@@ -449,6 +449,8 @@ body {
 .line-U8 { background-color: #224F86; color: white; }
 .line-U9 { background-color: #F3791D; color: white; }
 
+.line-M1, .line-M13, .line-50 { background-color: #BE1414; color: white; }
+
 /* Mobile styles */
 @media (max-width: 768px) {
     :root {

@@ -47,6 +47,7 @@ class Departure(_VBBModel):
     when: datetime
     provenance: str | None = None
     line: Line
+    direction: str | None = None
     destination: Station | None = None
 
 

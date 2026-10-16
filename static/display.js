@@ -634,7 +634,7 @@ function createQuadrant(quadrant, quadrantIndex) {
     return el;
 }
 
-/** Render all four quadrants into the grid. */
+/** Render all quadrants into the grid. */
 function renderQuadrants(data) {
     const grid = document.getElementById('display-grid');
     if (!grid) return;
@@ -644,8 +644,17 @@ function renderQuadrants(data) {
 
     updateDisplayStatus();
 
+    const scrollLeft = grid.scrollLeft;
     grid.innerHTML = '';
-    (data.quadrants || []).forEach((q, i) => grid.appendChild(createQuadrant(q, i)));
+    const cards = (data.quadrants || []).map((q, i) => createQuadrant(q, i));
+    if (cards.length % 2) {
+        const filler = document.createElement('div');
+        filler.className = 'quadrant quadrant--filler';
+        filler.setAttribute('aria-hidden', 'true');
+        cards.splice(cards.length - 2, 0, filler);
+    }
+    cards.forEach(card => grid.appendChild(card));
+    grid.scrollLeft = scrollLeft;
 }
 
 function recordFetchError(err, copy) {
@@ -668,7 +677,7 @@ function showError(copy) {
     const card = document.createElement('div');
     card.className = 'error-card';
     card.setAttribute('role', 'alert');
-    card.style.cssText = 'grid-column: 1 / -1; grid-row: 1 / -1;';
+    card.style.cssText = 'grid-column: span 2; grid-row: span 2;';
 
     const icon = document.createElement('span');
     icon.className = 'error-card__icon';

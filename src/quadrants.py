@@ -6,6 +6,8 @@ from datetime import datetime
 from .datamodels import Departure
 from .directions import compute_direction
 
+TERMINATING_DIRECTION = "Fahrt endet hier"
+
 
 @dataclass(frozen=True)
 class DepartureSlot:
@@ -36,6 +38,9 @@ def filter_and_group(
 ) -> list[QuadrantData]:
     """Filter departures by min_minutes and group into quadrants per config.
 
+    Terminating arrivals are dropped, and a trip listed more than once (a loop that
+    passes the stop twice) keeps only its earliest departure.
+
     Args:
         departures: Raw departure list from VBB.
         now: Reference time for computing minutes-until values.
@@ -51,15 +56,20 @@ def filter_and_group(
     direction_by_key = {q["key"]: q["direction"] for q in quadrants_config}
     groups: dict[str, list[DepartureSlot]] = {q["key"]: [] for q in quadrants_config}
 
-    for dep in departures:
+    seen_trip_ids: set[str] = set()
+    for dep in sorted(departures, key=lambda d: d.when):
+        if dep.direction == TERMINATING_DIRECTION:
+            continue
+
         line = dep.line.name
         direction = compute_direction(dep)
         if not direction:
             continue
 
         minutes = int((dep.when - now).total_seconds() / 60)
-        if minutes < min_minutes:
+        if minutes < min_minutes or dep.tripId in seen_trip_ids:
             continue
+        seen_trip_ids.add(dep.tripId)
 
         if not dep.tripId:
             raise ValueError(f"Departure missing tripId for line {line!r}")

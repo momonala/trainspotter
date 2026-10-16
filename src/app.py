@@ -120,14 +120,20 @@ def api_stations():
 def api_display_data():
     """Return quadrant departure data for the fixed display station as JSON."""
     display_config = config["display"]
-    station_id = display_config["station_id"]
+    default_station_id = display_config["station_id"]
+    quadrants_by_station: dict[str, list[dict]] = {}
+    for q in display_config["quadrants"]:
+        quadrants_by_station.setdefault(q.get("station_id", default_station_id), []).append(q)
     now = datetime.now(timezone.utc)
 
     try:
-        departures = get_departures(station_id)
+        with ThreadPoolExecutor(max_workers=len(quadrants_by_station)) as pool:
+            departures_by_station = dict(
+                zip(quadrants_by_station, pool.map(get_departures, quadrants_by_station), strict=True)
+            )
     except VBBAPIError as error:
         logger.warning("VBB API error [%s]: %s", error.kind, error)
-        diagnostics = {"station_id": station_id, **error.to_diagnostics()}
+        diagnostics = {"station_id": ",".join(quadrants_by_station), **error.to_diagnostics()}
         metrics.increment("response.502", tags={"route": "display_data"})
         return make_response(
             jsonify(
@@ -143,12 +149,17 @@ def api_display_data():
     try:
         # No cap: return every matching departure. The display shows 3 per quadrant
         # and reveals the rest via horizontal scroll (see .departures-row in display.css).
-        quadrants_data = filter_and_group(
-            departures,
-            now,
-            quadrants_config=display_config["quadrants"],
-            min_minutes=config["min_departure_time_min"],
-        )
+        grouped = {
+            q.key: q
+            for station_id, station_quadrants in quadrants_by_station.items()
+            for q in filter_and_group(
+                departures_by_station[station_id],
+                now,
+                quadrants_config=station_quadrants,
+                min_minutes=config["min_departure_time_min"],
+            )
+        }
+        quadrants_data = [grouped[q["key"]] for q in display_config["quadrants"]]
 
         walk_time = get_configured_walk_time(display_config["station_name"])
 

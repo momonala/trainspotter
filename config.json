@@ -4,7 +4,8 @@
     "vbb_api_base": "http://localhost:3000",
     "stations": {
       "gesundbrunnen": { "walk_time": 15 },
-      "bornholmer": { "walk_time": 7 }
+      "bornholmer": { "walk_time": 7 },
+      "björnsonstr": { "walk_time": 5 }
     },
     "walk_time_buffer": 2,
     "location": { "latitude": 52.552045, "longitude": 13.399863 },
@@ -23,22 +24,43 @@
           "direction": "↑"
         },
         {
-          "key": "s1_26_down",
-          "label": "S1/26",
-          "lines": ["S1", "S2", "S25", "S26"],
-          "direction": "↓"
-        },
-        {
           "key": "s8_up",
           "label": "S8/85",
           "lines": ["S8", "S85"],
           "direction": "↑"
         },
         {
+          "key": "s1_26_down",
+          "label": "S1/26",
+          "lines": ["S1", "S2", "S25", "S26"],
+          "direction": "↓"
+        },
+        {
           "key": "s8_clockwise",
           "label": "S8/85",
           "lines": ["S8", "S85"],
           "direction": "↻"
+        },
+        {
+          "key": "tram_west",
+          "label": "M13/50",
+          "lines": ["M13", "50"],
+          "direction": "←",
+          "station_id": "900110010"
+        },
+        {
+          "key": "tram_east",
+          "label": "50/M1",
+          "lines": ["50", "M1"],
+          "direction": "→",
+          "station_id": "900110010"
+        },
+        {
+          "key": "m13_east",
+          "label": "M13",
+          "lines": ["M13"],
+          "direction": "→",
+          "station_id": "900110010"
         }
       ]
     }

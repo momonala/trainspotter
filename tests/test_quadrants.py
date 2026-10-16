@@ -18,6 +18,7 @@ def _make_departure(
     direction: str | None = "↑",
     provenance: str = "Endstation",
     trip_id: str = "trip-1",
+    headsign: str = "Somewhere",
 ) -> Mock:
     """Build a minimal mock Departure with the fields filter_and_group needs."""
     location = Mock(latitude=52.5, longitude=13.4)
@@ -32,6 +33,7 @@ def _make_departure(
     dep.destination = destination
     dep.when = datetime.now(timezone.utc) + timedelta(minutes=minutes_until)
     dep.provenance = provenance
+    dep.direction = headsign
     return dep
 
 
@@ -145,6 +147,19 @@ def test_filter_and_group_routes_by_direction(now):
     assert result[1].departures[0].tripId == "trip-down"
 
 
+def test_filter_and_group_drops_terminating_arrivals(now):
+    dep = _make_departure("S1", 10, headsign="Fahrt endet hier")
+    result = filter_and_group([dep], now, QUADRANTS_CONFIG)
+    assert result[0].departures == []
+
+
+def test_filter_and_group_keeps_earliest_of_duplicate_trip(now):
+    later = _make_departure("S1", 11, trip_id="loop-trip")
+    earlier = _make_departure("S1", 10, trip_id="loop-trip")
+    result = filter_and_group([later, earlier], now, QUADRANTS_CONFIG)
+    assert [s.when for s in result[0].departures] == [earlier.when]
+
+
 def test_quadrant_data_dataclass():
     slot = DepartureSlot(tripId="trip-1", when=datetime.now(timezone.utc), line="S1", provenance="Oranienburg")
     q = QuadrantData(key="s1_up", label="S1/26", arrow="↑", departures=[slot])
@@ -152,3 +167,10 @@ def test_quadrant_data_dataclass():
     assert q.label == "S1/26"
     assert q.arrow == "↑"
     assert q.departures == [slot]
+
+
+def test_filter_and_group_keeps_later_pass_when_first_is_too_soon(now):
+    too_soon = _make_departure("S1", 1, trip_id="loop-trip")
+    later = _make_departure("S1", 20, trip_id="loop-trip")
+    result = filter_and_group([too_soon, later], now, QUADRANTS_CONFIG, min_minutes=5)
+    assert [s.when for s in result[0].departures] == [later.when]

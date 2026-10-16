@@ -156,9 +156,8 @@ def test_display_route_renders_html(client):
 # =============================================================================
 
 
-@patch("src.app.filter_and_group", return_value=[])
 @patch("src.app.get_departures", return_value=[])
-def test_api_display_data_returns_expected_shape(mock_departures, mock_filter, client):
+def test_api_display_data_returns_expected_shape(mock_departures, client):
     response = client.get("/api/display/data")
     assert response.status_code == 200
     data = response.get_json()
@@ -170,28 +169,28 @@ def test_api_display_data_returns_expected_shape(mock_departures, mock_filter, c
     assert isinstance(data["quadrants"], list)
 
 
-@patch("src.app.filter_and_group")
-@patch("src.app.get_departures", return_value=[])
-def test_api_display_data_departures_include_trip_id(mock_departures, mock_filter, client):
+@patch("src.app.get_departures")
+def test_api_display_data_departures_include_trip_id(mock_departures, client):
     from src.quadrants import DepartureSlot
     from src.quadrants import QuadrantData
 
     when = datetime(2026, 3, 24, 8, 10, 0, tzinfo=timezone.utc)
-    mock_filter.return_value = [
-        QuadrantData(
-            key="s1_26_up",
-            label="S1/26",
-            arrow="↑",
-            departures=[
-                DepartureSlot(tripId="trip-abc", when=when, line="S1", provenance="Oranienburg"),
-            ],
-        ),
-        QuadrantData(key="s1_26_down", label="S1/26", arrow="↓", departures=[]),
-        QuadrantData(key="s8_up", label="S8/85", arrow="↑", departures=[]),
-        QuadrantData(key="s8_clockwise", label="S8/85", arrow="↻", departures=[]),
-    ]
+    slot = DepartureSlot(tripId="trip-abc", when=when, line="S1", provenance="Oranienburg")
+    mock_departures.return_value = []
 
-    response = client.get("/api/display/data")
+    def fake_filter(departures, now, quadrants_config, min_minutes):
+        return [
+            QuadrantData(
+                key=q["key"],
+                label=q["label"],
+                arrow=q["direction"],
+                departures=[slot] if q["key"] == "s1_26_up" else [],
+            )
+            for q in quadrants_config
+        ]
+
+    with patch("src.app.filter_and_group", side_effect=fake_filter):
+        response = client.get("/api/display/data")
     assert response.status_code == 200
     dep = response.get_json()["quadrants"][0]["departures"][0]
     assert dep == {
@@ -211,6 +210,17 @@ def test_api_display_data_quadrant_keys_match_config(mock_departures, client):
     assert response.status_code == 200
     actual_keys = [q["key"] for q in response.get_json()["quadrants"]]
     assert actual_keys == expected_keys
+
+
+@patch("src.app.get_departures", return_value=[])
+def test_api_display_data_fetches_each_configured_stop_once(mock_departures, client):
+    from src.config import config
+
+    display = config["display"]
+    expected = {q.get("station_id", display["station_id"]) for q in display["quadrants"]}
+    response = client.get("/api/display/data")
+    assert response.status_code == 200
+    assert sorted(c.args[0] for c in mock_departures.call_args_list) == sorted(expected)
 
 
 @patch("src.app.get_departures", return_value=[])

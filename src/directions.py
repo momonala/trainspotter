@@ -19,6 +19,10 @@ def bearing_to_cardinal(bearing: float) -> str:
     return directions[round(bearing / 90) % len(directions)]
 
 
+def bearing_to_east_west(bearing: float) -> str:
+    return "→" if bearing < 180 else "←"
+
+
 def get_direction(line: str, direction: str) -> str:
     """Direction arrow for a line, with Ringbahn and station-specific overrides."""
     if line == "S41":
@@ -39,4 +43,6 @@ def compute_direction(dep: Departure) -> str | None:
     start = dep.stop.location
     end = dep.destination.location
     bearing = get_initial_bearing(start.latitude, start.longitude, end.latitude, end.longitude)
+    if dep.line.product == "tram":
+        return bearing_to_east_west(bearing)
     return get_direction(dep.line.name, bearing_to_cardinal(bearing))
