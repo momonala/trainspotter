@@ -16,6 +16,7 @@ dependencies = [
     "typer>=0.9.0",
     "spyglass",
     "pydantic>=2.13.4",
+    "python-dotenv>=1.2.2",
 ]
 
 [dependency-groups]

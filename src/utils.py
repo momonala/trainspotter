@@ -13,7 +13,7 @@ from .config import config
 from .datamodels import Departure
 from .datamodels import Station
 from .directions import compute_direction
-from .values import GMAPS_API_KEY
+from .env import GMAPS_API_KEY
 
 logger = logging.getLogger(__name__)
 

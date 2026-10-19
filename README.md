@@ -19,7 +19,7 @@ trainspotter/
 │   ├── datamodels.py           # Pydantic models: Station, Departure, Line, Location, Products
 │   ├── quadrants.py            # Filter departures by quadrant config, group into QuadrantData
 │   ├── config.py               # Single config loader (config.json + pyproject metadata); exposes FLASK_PORT etc
-│   └── values.py.example       # Template for values.py (git-ignored); set GMAPS_API_KEY here
+│   └── env.py                  # Secrets loaded from .env (copy .env.example); GMAPS_API_KEY
 ├── assets/
 │   └── vbb_stations.json       # Static stop snapshot (~thousands of stops); regenerate with scripts/fetch_stations.py
 ├── scripts/
@@ -221,8 +221,8 @@ uv sync
 Copy and fill in secrets:
 
 ```bash
-cp src/values.py.example src/values.py
-# Set GMAPS_API_KEY in src/values.py
+cp .env.example .env
+# Set GMAPS_API_KEY in .env
 ```
 
 Start the server:
@@ -384,7 +384,7 @@ Departure
 ### Google Maps Directions API
 - Walking mode only; used when a station has no `walk_time` in `config.json`.
 - Results are joblib disk-cached in `.cache/` (keyed by origin + destination coordinates).
-- Requires `GMAPS_API_KEY` in `src/values.py`.
+- Requires `GMAPS_API_KEY` in `.env`.
 
 ---
 
