@@ -8,22 +8,22 @@ authors = [
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "flask>=3.0.0",
-    "requests>=2.31.0",
-    "urllib3>=2.0.0",
+    "flask>=3.1.3",
+    "requests>=2.34.2",
+    "urllib3>=2.8.0",
     "googlemaps>=4.10.0",
     "joblib>=1.0.0,<2.0.0",
-    "typer>=0.9.0",
+    "typer>=0.27.3",
     "spyglass",
-    "pydantic>=2.13.4",
-    "python-dotenv>=1.2.2",
+    "pydantic>=2.14.1",
+    "python-dotenv>=1.2.4",
 ]
 
 [dependency-groups]
 dev = [
-    "pytest>=8.0.0",
-    "pytest-cov>=4.0.0",
-    "ruff>=0.14.10",
+    "pytest>=9.1.1",
+    "pytest-cov>=7.1.0",
+    "ruff>=0.17.0",
 ]
 
 [build-system]
@@ -75,6 +75,7 @@ exclude_lines = [
 
 [tool.uv]
 exclude-newer = "1 week"
+exclude-newer-package = { certifi = false }
 
 [tool.uv.sources]
 spyglass = { git = "https://github.com/momonala/spyglass.git", rev = "main" }
