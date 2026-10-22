@@ -1,8 +1,8 @@
 """Tests for quadrant filtering and grouping logic."""
 
+from datetime import UTC
 from datetime import datetime
 from datetime import timedelta
-from datetime import timezone
 from unittest.mock import Mock
 
 import pytest
@@ -31,7 +31,7 @@ def _make_departure(
     dep.line.name = line_name
     dep.stop = stop
     dep.destination = destination
-    dep.when = datetime.now(timezone.utc) + timedelta(minutes=minutes_until)
+    dep.when = datetime.now(UTC) + timedelta(minutes=minutes_until)
     dep.provenance = provenance
     dep.direction = headsign
     return dep
@@ -47,7 +47,7 @@ QUADRANTS_CONFIG = [
 
 @pytest.fixture
 def now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def test_filter_and_group_returns_one_entry_per_config(now):
@@ -161,7 +161,7 @@ def test_filter_and_group_keeps_earliest_of_duplicate_trip(now):
 
 
 def test_quadrant_data_dataclass():
-    slot = DepartureSlot(tripId="trip-1", when=datetime.now(timezone.utc), line="S1", provenance="Oranienburg")
+    slot = DepartureSlot(tripId="trip-1", when=datetime.now(UTC), line="S1", provenance="Oranienburg")
     q = QuadrantData(key="s1_up", label="S1/26", arrow="↑", departures=[slot])
     assert q.key == "s1_up"
     assert q.label == "S1/26"

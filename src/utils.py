@@ -2,8 +2,8 @@
 
 import logging
 import math
+from datetime import UTC
 from datetime import datetime
-from datetime import timezone
 
 import googlemaps
 from joblib import Memory
@@ -120,7 +120,7 @@ def process_station_departures(
     """
 
     walk_time = get_walk_time(station, browser_coordinates)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     processed = []
     for departure in departures:

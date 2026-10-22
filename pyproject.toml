@@ -42,7 +42,8 @@ line-length = 120
 target-version = "py312"
 
 [tool.ruff.lint]
-extend-select = ["I"]
+select = ["E", "F", "I", "B", "UP", "SIM", "RUF100", "PLW1510"]
+ignore = ["E501", "B008", "UP042"]
 
 [tool.ruff.lint.isort]
 force-single-line = true

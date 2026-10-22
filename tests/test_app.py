@@ -1,6 +1,6 @@
+from datetime import UTC
 from datetime import datetime
 from datetime import timedelta
-from datetime import timezone
 from unittest.mock import Mock
 from unittest.mock import patch
 
@@ -15,7 +15,7 @@ from src.datamodels import Station
 from src.vbb_api import VBBAPIError
 
 TEST_STATION_ID = "900110011"
-BASE_TIME_UTC = datetime(2026, 3, 24, 8, 0, 0, tzinfo=timezone.utc)
+BASE_TIME_UTC = datetime(2026, 3, 24, 8, 0, 0, tzinfo=UTC)
 
 
 @pytest.fixture
@@ -77,7 +77,7 @@ def stations_api_departure() -> Mock:
     mock_line.product = "suburban"
     mock_departure = Mock()
     mock_departure.line = mock_line
-    mock_departure.when = datetime.now(timezone.utc) + timedelta(minutes=10)
+    mock_departure.when = datetime.now(UTC) + timedelta(minutes=10)
     mock_departure.stop = Mock(location=mock_location)
     mock_departure.destination = mock_destination
     return mock_departure
@@ -174,7 +174,7 @@ def test_api_display_data_departures_include_trip_id(mock_departures, client):
     from src.quadrants import DepartureSlot
     from src.quadrants import QuadrantData
 
-    when = datetime(2026, 3, 24, 8, 10, 0, tzinfo=timezone.utc)
+    when = datetime(2026, 3, 24, 8, 10, 0, tzinfo=UTC)
     slot = DepartureSlot(tripId="trip-abc", when=when, line="S1", provenance="Oranienburg")
     mock_departures.return_value = []
 

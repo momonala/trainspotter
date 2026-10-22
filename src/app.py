@@ -1,7 +1,7 @@
 import logging
 from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC
 from datetime import datetime
-from datetime import timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -44,7 +44,7 @@ COORDINATE_ACCURACY_DECIMALS = 3
 
 # Cache-busting version for static assets: stable per process so assets cache
 # between page loads, but stale iOS caches bust on every deploy/restart.
-ASSET_VERSION = int(datetime.now(timezone.utc).timestamp())
+ASSET_VERSION = int(datetime.now(UTC).timestamp())
 
 
 def _station_board_row(station: Station, user_coords: tuple[float, float] | None) -> dict:
@@ -124,7 +124,7 @@ def api_display_data():
     quadrants_by_station: dict[str, list[dict]] = {}
     for q in display_config["quadrants"]:
         quadrants_by_station.setdefault(q.get("station_id", default_station_id), []).append(q)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     try:
         with ThreadPoolExecutor(max_workers=len(quadrants_by_station)) as pool:
