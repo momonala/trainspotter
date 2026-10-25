@@ -183,3 +183,16 @@ def test_vbb_api_error_summary_for_http_status():
     assert error.summary == "VBB returned 503"
     diagnostics = error.to_diagnostics()
     assert diagnostics["vbb_http_status"] == 503
+
+
+@patch("src.vbb_api.metrics")
+@patch("src.vbb_api.session.get")
+def test_get_departures_emits_vbb_metrics_read_by_spyglass_dashboard(mock_get, mock_metrics):
+    mock_get.side_effect = requests.Timeout("read timed out")
+
+    with pytest.raises(VBBAPIError):
+        get_departures("900000999999")
+
+    mock_metrics.increment.assert_called_once_with("vbb.error", tags={"kind": "timeout"})
+    assert mock_metrics.timing.call_args.args[0] == "vbb.fetch"
+    assert mock_metrics.timing.call_args.kwargs["tags"] == {"outcome": "error"}

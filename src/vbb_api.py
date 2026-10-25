@@ -1,6 +1,7 @@
 import json
 import logging
 import math
+import time
 from operator import itemgetter
 from pathlib import Path
 
@@ -14,6 +15,7 @@ from .datamodels import Departure
 from .datamodels import Station
 from .datamodels import parse_departures
 from .datamodels import parse_stations
+from .metrics import metrics
 
 logger = logging.getLogger(__name__)
 logging.getLogger("urllib3.connectionpool").setLevel(logging.ERROR)
@@ -181,6 +183,7 @@ def get_nearby_stations(coordinates: tuple[float, float] | None = None) -> list[
 
 def get_departures(station_id: str) -> list[Departure]:
     """Fetch departures from VBB for a stop ID."""
+    started = time.perf_counter()
     try:
         departures_resp = session.get(
             f"{VBB_API_BASE}/stops/{station_id}/departures",
@@ -194,10 +197,14 @@ def get_departures(station_id: str) -> list[Departure]:
         )
         departures_resp.raise_for_status()
         departures_data = departures_resp.json()
+        metrics.timing("vbb.fetch", (time.perf_counter() - started) * 1000, tags={"outcome": "ok"})
+        metrics.increment("vbb.success")
         return parse_departures(departures_data)
 
     except requests.RequestException as e:
+        metrics.timing("vbb.fetch", (time.perf_counter() - started) * 1000, tags={"outcome": "error"})
         kind, http_status = _classify_request_exception(e)
+        metrics.increment("vbb.error", tags={"kind": kind})
         raise VBBAPIError(f"VBB API error: {e}", kind=kind, http_status=http_status) from e
 
 

@@ -11,7 +11,6 @@ from flask import make_response
 from flask import redirect
 from flask import render_template
 from flask import request
-from spyglass import MetricsCollector
 from spyglass import configure_logging
 
 from .config import FLASK_PORT
@@ -19,6 +18,7 @@ from .config import PROJECT_NAME
 from .config import SPYGLASS_HOST
 from .config import config
 from .datamodels import Station
+from .metrics import metrics
 from .quadrants import filter_and_group
 from .utils import get_configured_walk_time
 from .utils import get_thresholds
@@ -32,7 +32,6 @@ from .vbb_api import get_nearby_stations
 logger = logging.getLogger(__name__)
 
 configure_logging(host=SPYGLASS_HOST, project=PROJECT_NAME)
-metrics = MetricsCollector(host=SPYGLASS_HOST, project=PROJECT_NAME)
 
 basedir = Path(__file__).parent.parent
 app = Flask(__name__, template_folder=str(basedir / "templates"), static_folder=str(basedir / "static"))
