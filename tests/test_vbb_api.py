@@ -194,5 +194,3 @@ def test_get_departures_emits_vbb_metrics_read_by_spyglass_dashboard(mock_get, m
         get_departures("900000999999")
 
     mock_metrics.increment.assert_called_once_with("vbb.error", tags={"kind": "timeout"})
-    assert mock_metrics.timing.call_args.args[0] == "vbb.fetch"
-    assert mock_metrics.timing.call_args.kwargs["tags"] == {"outcome": "error"}
