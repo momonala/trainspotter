@@ -32,7 +32,6 @@ config = "src.config:main"
 
 [tool.ruff]
 line-length = 120
-target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "SIM", "RUF100", "PLW1510"]

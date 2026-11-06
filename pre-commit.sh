@@ -1,5 +1,5 @@
 #!/bin/bash
-# Pre-commit hook to run tests and ruff
+# Pre-commit hook: tests, ruff format, ruff check
 
 set -e
 
@@ -7,7 +7,7 @@ echo "🧪 Running tests..."
 uv run --with pytest --with pytest-cov pytest
 
 echo "🖤 Running ruff format..."
-if ! uvx ruff format . --check; then
+if ! uvx ruff format --check .; then
     echo "❌ Ruff found formatting issues. To auto fix, run:"
     echo -e "\033[32muvx ruff format .\033[0m"
     exit 1
