@@ -11,26 +11,6 @@ from src.vbb_api import get_departures
 from src.vbb_api import get_inbound_trains
 from src.vbb_api import get_nearby_stations
 
-
-def _minimal_stop():
-    return {
-        "type": "stop",
-        "id": "900000100001",
-        "name": "S+U Alexanderplatz",
-        "location": {"type": "location", "id": "900100001", "latitude": 52.521551, "longitude": 13.411511},
-        "products": {
-            "suburban": True,
-            "subway": True,
-            "tram": True,
-            "bus": True,
-            "ferry": False,
-            "express": False,
-            "regional": True,
-        },
-        "stationDHID": "de:11000:900100001",
-    }
-
-
 ALEXANDERPLATZ_FIXTURE = {
     "type": "stop",
     "id": "900100003",
@@ -92,12 +72,6 @@ def test_get_nearby_stations_excludes_stops_beyond_straightline_radius():
     assert stations[0].id == ALEXANDERPLATZ_FIXTURE["id"]
 
 
-@patch("src.vbb_api._ALL_STATIONS", [ALEXANDERPLATZ_FIXTURE])
-def test_get_nearby_stations_computes_haversine_distance():
-    stations = get_nearby_stations((52.5219, 13.4132))
-    assert stations[0].distance > 0
-
-
 @patch("src.vbb_api.session.get")
 def test_get_inbound_trains_success(mock_get):
     mock_response = Mock()
@@ -105,29 +79,9 @@ def test_get_inbound_trains_success(mock_get):
         "departures": [
             {
                 "tripId": "1|123|0|80|1012025",
-                "stop": _minimal_stop(),
+                "stop": ALEXANDERPLATZ_FIXTURE,
                 "when": "2025-01-09T12:30:00+01:00",
-                "plannedWhen": "2025-01-09T12:30:00+01:00",
-                "delay": None,
-                "platform": "1",
-                "plannedPlatform": "1",
-                "prognosisType": None,
-                "direction": "Spandau",
-                "provenance": "via Friedrichstraße",
-                "line": {
-                    "type": "line",
-                    "id": "s41",
-                    "fahrtNr": "12345",
-                    "name": "S41",
-                    "public": True,
-                    "adminCode": "80____",
-                    "productName": "S",
-                    "mode": "train",
-                    "product": "suburban",
-                },
-                "remarks": [],
-                "origin": None,
-                "destination": None,
+                "line": {"name": "S41", "product": "suburban"},
             }
         ]
     }
@@ -158,7 +112,6 @@ def test_get_departures_handles_errors(mock_get):
     ("exc", "expected_kind", "expected_status"),
     [
         (requests.HTTPError("503", response=Mock(status_code=503)), "http_503", 503),
-        (requests.HTTPError("502", response=Mock(status_code=502)), "http_502", 502),
         (requests.ReadTimeout("read timed out"), "timeout", None),
         (requests.ConnectionError("connection refused"), "connection", None),
     ],

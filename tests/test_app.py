@@ -7,15 +7,8 @@ from unittest.mock import patch
 import pytest
 
 from src.app import app
-from src.datamodels import Departure
-from src.datamodels import Line
 from src.datamodels import Location
-from src.datamodels import Products
-from src.datamodels import Station
 from src.vbb_api import VBBAPIError
-
-TEST_STATION_ID = "900110011"
-BASE_TIME_UTC = datetime(2026, 3, 24, 8, 0, 0, tzinfo=UTC)
 
 
 @pytest.fixture
@@ -23,48 +16,6 @@ def client():
     app.config["TESTING"] = True
     with app.test_client() as client:
         yield client
-
-
-@pytest.fixture
-def base_now_utc() -> datetime:
-    return BASE_TIME_UTC
-
-
-@pytest.fixture
-def station_location() -> Location:
-    return Location(latitude=52.5, longitude=13.4)
-
-
-@pytest.fixture
-def test_station(station_location: Location) -> Station:
-    return Station(
-        id="900000100001",
-        name="Test Station",
-        location=station_location,
-        products=Products(suburban=True),
-        distance=0,
-    )
-
-
-@pytest.fixture
-def suburban_line() -> Line:
-    return Line(name="S41", product="suburban")
-
-
-@pytest.fixture
-def departure_factory(test_station: Station, suburban_line: Line):
-    def _build(base_now: datetime, minutes_until: int) -> Departure:
-        when = base_now + timedelta(minutes=minutes_until)
-        return Departure(
-            tripId="trip-1",
-            stop=test_station,
-            when=when,
-            provenance="Gesundbrunnen",
-            line=suburban_line,
-            destination=test_station,
-        )
-
-    return _build
 
 
 @pytest.fixture
@@ -85,11 +36,10 @@ def stations_api_departure() -> Mock:
 
 @pytest.fixture
 def stations_api_station() -> Mock:
-    location = Location(latitude=52.5, longitude=13.4)
     station = Mock()
     station.name = "Test Station"
     station.distance = 100
-    station.location = Mock(latitude=location.latitude, longitude=location.longitude)
+    station.location = Location(latitude=52.5, longitude=13.4)
     return station
 
 
@@ -98,10 +48,11 @@ def stations_api_station() -> Mock:
 # =============================================================================
 
 
-def test_index_route(client):
-    response = client.get("/")
+@pytest.mark.parametrize("path", ["/", "/display"])
+def test_pages_render(client, path):
+    response = client.get(path)
     assert response.status_code == 200
-    assert b"<!DOCTYPE html>" in response.data or b"<html" in response.data
+    assert b"<html" in response.data.lower()
 
 
 @patch("src.utils.get_walk_time", return_value=10)
@@ -141,32 +92,21 @@ def test_api_stations_without_coords_uses_config_fallback(mock_get_stations, cli
 
 
 # =============================================================================
-# /display page
-# =============================================================================
-
-
-def test_display_route_renders_html(client):
-    response = client.get("/display")
-    assert response.status_code == 200
-    assert b"<!DOCTYPE html>" in response.data or b"<html" in response.data
-
-
-# =============================================================================
 # /api/display/data
 # =============================================================================
 
 
 @patch("src.app.get_departures", return_value=[])
-def test_api_display_data_returns_expected_shape(mock_departures, client):
+def test_api_display_data_follows_config(mock_departures, client):
+    from src.config import config
+
     response = client.get("/api/display/data")
     assert response.status_code == 200
     data = response.get_json()
-    assert "station_name" in data
-    assert "walk_time" in data
+    assert data["walk_time"] == 7
+    assert data["min_departure_min"] == config["min_departure_time_min"]
     assert "timestamp" in data
-    assert "min_departure_min" in data
-    assert "quadrants" in data
-    assert isinstance(data["quadrants"], list)
+    assert [q["key"] for q in data["quadrants"]] == [q["key"] for q in config["display"]["quadrants"]]
 
 
 @patch("src.app.get_departures")
@@ -202,17 +142,6 @@ def test_api_display_data_departures_include_trip_id(mock_departures, client):
 
 
 @patch("src.app.get_departures", return_value=[])
-def test_api_display_data_quadrant_keys_match_config(mock_departures, client):
-    from src.config import config
-
-    expected_keys = [q["key"] for q in config["display"]["quadrants"]]
-    response = client.get("/api/display/data")
-    assert response.status_code == 200
-    actual_keys = [q["key"] for q in response.get_json()["quadrants"]]
-    assert actual_keys == expected_keys
-
-
-@patch("src.app.get_departures", return_value=[])
 def test_api_display_data_fetches_each_configured_stop_once(mock_departures, client):
     from src.config import config
 
@@ -221,13 +150,6 @@ def test_api_display_data_fetches_each_configured_stop_once(mock_departures, cli
     response = client.get("/api/display/data")
     assert response.status_code == 200
     assert sorted(c.args[0] for c in mock_departures.call_args_list) == sorted(expected)
-
-
-@patch("src.app.get_departures", return_value=[])
-def test_api_display_data_walk_time_from_config(mock_departures, client):
-    response = client.get("/api/display/data")
-    assert response.status_code == 200
-    assert response.get_json()["walk_time"] == 7
 
 
 @patch("src.app.get_departures")

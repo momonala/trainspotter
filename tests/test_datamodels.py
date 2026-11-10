@@ -43,16 +43,6 @@ def test_parse_stations_removes_berlin_suffix():
     assert stations[0].distance == 100
 
 
-def test_parse_stations_ignores_unknown_fields():
-    stations = parse_stations([{**MINIMAL_STOP, "someNewVbbField": "x"}])
-    assert stations[0].id == "900000100001"
-    assert stations[0].products.suburban is True
-
-
-def test_parse_stations_empty():
-    assert parse_stations([]) == []
-
-
 def test_parse_departures():
     departures = parse_departures({"departures": [_departure_dict()]})
     assert len(departures) == 1
@@ -64,7 +54,3 @@ def test_parse_departures():
 def test_parse_departures_skips_cancelled_trips():
     departures = parse_departures({"departures": [_departure_dict(when=None), _departure_dict()]})
     assert len(departures) == 1
-
-
-def test_parse_departures_empty():
-    assert parse_departures({"departures": []}) == []

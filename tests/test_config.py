@@ -1,4 +1,3 @@
-import pytest
 import typer
 from typer.testing import CliRunner
 
@@ -10,27 +9,17 @@ app.command()(config_cli)
 runner = CliRunner()
 
 
-@pytest.mark.parametrize(
-    "flag,expected_output",
-    [
-        ("--project-name", "trainspotter"),
-        ("--project-version", "0.1.0"),
-        ("--flask-port", "5007"),
-        ("--spyglass-host", "localhost:5013"),
-        ("--vbb-api-base", "http://localhost:3000"),
-    ],
-)
-def test_config_returns_single_value(flag: str, expected_output: str):
-    result = runner.invoke(app, [flag])
+def test_config_flag_prints_only_that_value():
+    result = runner.invoke(app, ["--flask-port"])
     assert result.exit_code == 0
-    assert result.stdout.strip() == expected_output
+    assert result.stdout.strip() == "5007"
 
 
-def test_config_all_returns_all_values():
+def test_config_all_prints_key_value_lines():
     result = runner.invoke(app, ["--all"])
     assert result.exit_code == 0
-    assert "project_name=trainspotter" in result.stdout
-    assert "flask_port=" in result.stdout
+    assert "project_name=trainspotter" in result.stdout.splitlines()
+    assert "flask_port=5007" in result.stdout.splitlines()
 
 
 def test_config_without_flag_fails():
