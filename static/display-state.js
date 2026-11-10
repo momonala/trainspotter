@@ -67,6 +67,10 @@ function fetchFailed(previous, err, copy, nowMs) {
     };
 }
 
+function retryNotice(refreshIntervalMs) {
+    return `Retrying every ${refreshIntervalMs / 1000}s`;
+}
+
 /**
  * Owns the single FetchStatus value. `refresh()` is a no-op (returns false)
  * while a previous refresh is still running.
@@ -295,5 +299,6 @@ if (typeof module !== 'undefined') {
         fetchSucceeded,
         planRender,
         renderedQuadrants,
+        retryNotice,
     };
 }

@@ -8,6 +8,7 @@ const {
     createDisplayFetch,
     planRender,
     renderedQuadrants,
+    retryNotice,
 } = require('../../static/display-state.js');
 
 const NOW = Date.parse('2026-11-10T08:00:00Z');
@@ -258,4 +259,9 @@ test('renderedQuadrants is the last render index only while its value is current
     const failed = { status: 'error', data: null, error: {}, updatedAt: NOW };
     assert.equal(renderedQuadrants(failed, plan).size, 0);
     assert.equal(renderedQuadrants(INITIAL_FETCH_STATUS, null).size, 0);
+});
+
+test('retryNotice renders the refresh interval in seconds', () => {
+    assert.equal(retryNotice(10_000), 'Retrying every 10s');
+    assert.equal(retryNotice(30_000), 'Retrying every 30s');
 });

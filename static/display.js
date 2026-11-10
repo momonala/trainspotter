@@ -600,7 +600,7 @@ function showError(copy) {
 
     const sub = document.createElement('p');
     sub.className = 'error-card__sub';
-    sub.textContent = `${copy.subtitle} · Retrying every 30s`;
+    sub.textContent = `${copy.subtitle} · ${retryNotice(DISPLAY_CONFIG.REFRESH_INTERVAL_MS)}`;
 
     card.append(icon, title, sub);
     grid.appendChild(card);
