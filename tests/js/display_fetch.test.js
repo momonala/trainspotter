@@ -151,8 +151,9 @@ test('error -> fresh clears the error', async () => {
 test('refresh is skipped while one is in flight, and allowed again after', async () => {
     const { pending, refresh } = fakeFetch();
     const first = refresh();
-    assert.equal(await refresh(), false);
+    const second = refresh();
     assert.equal(pending.length, 1);
+    assert.equal(await second, false);
     pending[0].resolve(fakeData());
     assert.equal(await first, true);
 
