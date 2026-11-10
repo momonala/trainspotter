@@ -45,13 +45,19 @@ const DAYS_OF_WEEK = [
 // State
 // =============================================================================
 
-const state = {
-    lastData: null,
-    lastUpdatedAt: null,
-    quadrantsByKey: new Map(),
-    lastRenderedSnapshot: null,
-    lastError: null,
-};
+const displayFetch = createDisplayFetch({
+    load: fetchDisplayData,
+    describeError: describeDisplayFetchError,
+});
+let lastRender = null;
+
+function fetchStatus() {
+    return displayFetch.current;
+}
+
+function quadrantsByKey() {
+    return renderedQuadrants(displayFetch.current, lastRender);
+}
 
 // Zoom modal state
 const zoom = {
@@ -66,7 +72,6 @@ let alarmTimerId = null;
 let alarmAutoStopId = null;  // clears the alarm sound after 60 s
 let audioCtx = null;         // shared context — must be created inside a user gesture
 let muted = localStorage.getItem('alarmMuted') === 'true';
-let refreshInFlight = false;
 const warnedMissingQuadrantKeys = new Set();
 
 // =============================================================================
@@ -198,73 +203,23 @@ async function fetchDisplayData() {
 }
 
 // =============================================================================
-// View model — minutes derived from departure timestamps on every tick
+// Rendering on change — minutes derived from departure timestamps on every tick
 // =============================================================================
-
-/** Epoch ms of a departure's `when` ISO timestamp. */
-function departureMs(dep) {
-    return Date.parse(dep.when);
-}
-
-/** Whole minutes until a departure (floored, like the badge shows). */
-function departureMinutes(dep, nowMs = Date.now()) {
-    return Math.floor((departureMs(dep) - nowMs) / 60_000);
-}
-
-/**
- * Quadrants with computed `minutes`, dropping trains that are no longer
- * catchable (same min_departure_min gate as the server applies at fetch time).
- */
-function currentQuadrants(nowMs = Date.now()) {
-    const minMinutes = state.lastData?.min_departure_min ?? 5;
-    return (state.lastData?.quadrants ?? []).map(q => ({
-        ...q,
-        departures: (q.departures ?? [])
-            .map(dep => ({ ...dep, minutes: departureMinutes(dep, nowMs) }))
-            .filter(dep => dep.minutes >= minMinutes),
-    }));
-}
-
-/** JSON snapshot of quadrant departures — used to skip redundant re-renders. */
-function departuresSnapshot(quadrants) {
-    return JSON.stringify(
-        quadrants.map(q => (q.departures ?? []).map(dep => `${dep.tripId}:${dep.minutes}`)),
-    );
-}
 
 /** Re-render the grid whenever any departure's displayed minutes changed. */
 function renderCurrentIfChanged() {
-    if (!state.lastData) return;
+    const current = fetchStatus();
+    const plan = planRender(current, lastRender);
+    if (!plan) return;
 
-    const quadrants = currentQuadrants();
-    const snapshot = departuresSnapshot(quadrants);
-    if (snapshot === state.lastRenderedSnapshot) return;
-
-    state.lastRenderedSnapshot = snapshot;
-    rebuildQuadrantIndex(quadrants);
-    renderQuadrants({ ...state.lastData, quadrants });
+    lastRender = plan;
+    renderQuadrants({ ...current.data, quadrants: plan.quadrants });
     syncZoomDeparture();
 }
 
 // =============================================================================
 // Display serving status (timer colour + header badge)
 // =============================================================================
-
-/** @typedef {'loading' | 'fresh' | 'error'} DisplayServingStatus */
-
-/**
- * Derive UI state from the latest fetch outcome.
- * @returns {DisplayServingStatus}
- */
-function resolveDisplayStatus() {
-    if (state.lastError) {
-        return 'error';
-    }
-    if (state.lastData) {
-        return 'fresh';
-    }
-    return 'loading';
-}
 
 function formatRelativeAgo(fromMs) {
     if (fromMs == null) return '';
@@ -276,8 +231,8 @@ function formatRelativeAgo(fromMs) {
 }
 
 function formatLastUpdatedLabel() {
-    if (state.lastUpdatedAt == null) return '';
-    return `(last updated ${formatRelativeAgo(state.lastUpdatedAt)})`;
+    if (fetchStatus().updatedAt == null) return '';
+    return `(last updated ${formatRelativeAgo(fetchStatus().updatedAt)})`;
 }
 
 /**
@@ -286,7 +241,7 @@ function formatLastUpdatedLabel() {
  */
 function getStatusBadgeText(status) {
     if (status === 'error') {
-        return state.lastError?.badge ?? '⚠\u2009no data';
+        return fetchStatus().error?.badge ?? '⚠\u2009no data';
     }
     return null;
 }
@@ -302,9 +257,9 @@ function updateClock() {
     });
 }
 
-/** Sync header timer colour and status badge with resolveDisplayStatus(). */
+/** Sync header timer colour and status badge with the fetch status. */
 function updateDisplayStatus() {
-    const status = resolveDisplayStatus();
+    const status = fetchStatus().status;
     const timerEl = document.getElementById('last-updated-ago');
     const badgeEl = document.getElementById('stale-badge');
 
@@ -322,7 +277,7 @@ function updateDisplayStatus() {
             timerEl.textContent = formatLastUpdatedLabel();
         } else {
             timerEl.classList.add('last-updated-ago--error');
-            timerEl.textContent = state.lastUpdatedAt
+            timerEl.textContent = fetchStatus().updatedAt
                 ? formatLastUpdatedLabel()
                 : '(no data)';
         }
@@ -450,8 +405,8 @@ function vbbWarningMessage(diag) {
 function syncVbbWarning() {
     const modalEl = document.getElementById('modal-vbb-warning');
     const scheduleEl = document.getElementById('schedule-vbb-warning');
-    const vbbDown = !!state.lastError;
-    const diag = state.lastError?.err?.serverDiagnostics;
+    const vbbDown = !!fetchStatus().error;
+    const diag = fetchStatus().error?.err?.serverDiagnostics;
     const message = vbbDown ? vbbWarningMessage(diag) : '';
     for (const el of [modalEl, scheduleEl]) {
         if (!el) continue;
@@ -463,7 +418,7 @@ function syncVbbWarning() {
 /** Find a departure across all quadrants by VBB tripId. */
 function findDepartureByTripId(tripId) {
     if (!tripId) return null;
-    for (const quadrant of state.quadrantsByKey.values()) {
+    for (const quadrant of quadrantsByKey().values()) {
         const match = (quadrant.departures ?? []).find(dep => dep.tripId === tripId);
         if (match) return match;
     }
@@ -657,15 +612,6 @@ function renderQuadrants(data) {
     grid.scrollLeft = scrollLeft;
 }
 
-function recordFetchError(err, copy) {
-    state.lastError = {
-        ...copy,
-        at: Date.now(),
-        err,
-        consecutiveFailures: (state.lastError?.consecutiveFailures ?? 0) + 1,
-    };
-}
-
 /** Render a full-grid error state spanning all quadrant cells. */
 function showError(copy) {
     console.error(`🚆 ${copy.title} — ${copy.subtitle}`);
@@ -709,7 +655,7 @@ function formatDiagnosticsValue(value) {
 
 function buildDiagnosticLines() {
     const lines = [];
-    const fetchError = state.lastError;
+    const fetchError = fetchStatus().error;
     const raw = fetchError?.err;
     const diag = raw?.serverDiagnostics;
 
@@ -736,12 +682,12 @@ function buildDiagnosticLines() {
         if (diag.vbb_error) lines.push(['VBB error detail', diag.vbb_error]);
     }
 
-    if (state.lastUpdatedAt) {
-        lines.push(['Last successful fetch', formatRelativeAgo(state.lastUpdatedAt)]);
-        lines.push(['Last fetch at', new Date(state.lastUpdatedAt).toLocaleString('de-DE', { timeZone: BERLIN_TZ })]);
+    if (fetchStatus().updatedAt) {
+        lines.push(['Last successful fetch', formatRelativeAgo(fetchStatus().updatedAt)]);
+        lines.push(['Last fetch at', new Date(fetchStatus().updatedAt).toLocaleString('de-DE', { timeZone: BERLIN_TZ })]);
     }
-    if (state.lastData?.timestamp) lines.push(['Server timestamp', state.lastData.timestamp]);
-    lines.push(['Display status', resolveDisplayStatus()]);
+    if (fetchStatus().data?.timestamp) lines.push(['Server timestamp', fetchStatus().data.timestamp]);
+    lines.push(['Display status', fetchStatus().status]);
 
     lines.push(['Client fetch timeout', `${DISPLAY_CONFIG.FETCH_TIMEOUT_MS / 1000}s`]);
     lines.push(['Poll interval', `${DISPLAY_CONFIG.REFRESH_INTERVAL_MS / 1000}s`]);
@@ -784,33 +730,17 @@ function closeDiagnosticsModal() {
 // Data loop
 // =============================================================================
 
-function rebuildQuadrantIndex(quadrants) {
-    state.quadrantsByKey = new Map(quadrants.map(q => [q.key, q]));
-}
-
 async function refresh() {
-    if (refreshInFlight) return;
-    refreshInFlight = true;
-    try {
-        const data = await fetchDisplayData();
-        state.lastData = data;
-        state.lastError = null;
-        warnedMissingQuadrantKeys.clear();
-        state.lastUpdatedAt = Date.now();
-        state.lastRenderedSnapshot = null;  // force a render with the fresh data
-        renderCurrentIfChanged();
-        console.info(`[refresh] updated — station: ${data.station_name}`);
-    } catch (err) {
-        const copy = describeDisplayFetchError(err);
-        recordFetchError(err, copy);
-        state.lastData = null;
-        state.quadrantsByKey = new Map();
-        state.lastRenderedSnapshot = null;
-        showError(copy);
-    } finally {
-        refreshInFlight = false;
-    }
-    // Run outside the try/catch so schedule errors don't masquerade as fetch failures.
+    const ran = await displayFetch.refresh({
+        onFresh: ({ data }) => {
+            warnedMissingQuadrantKeys.clear();
+            renderCurrentIfChanged();
+            console.info(`[refresh] updated — station: ${data.station_name}`);
+        },
+        onError: ({ error }) => showError(error),
+    });
+    if (!ran) return;
+    // Run after the fetch handlers so schedule errors don't masquerade as fetch failures.
     evaluateSchedules();
 }
 
@@ -1190,7 +1120,7 @@ function readToleranceMinutes() {
 
 /** Derive direction + line wheel options from live quadrant data (encounter order). */
 function buildRouteOptions() {
-    const quadrants = state.lastData?.quadrants ?? [];
+    const quadrants = fetchStatus().data?.quadrants ?? [];
 
     const arrows = [];
     for (const q of quadrants) {
@@ -1219,7 +1149,7 @@ function buildRouteOptions() {
  * Returns null when no quadrant carries that line in that direction (e.g. "S1/26 Clockwise").
  */
 function resolveRouteSelection(lineValue, arrow) {
-    const quadrants = state.lastData?.quadrants ?? [];
+    const quadrants = fetchStatus().data?.quadrants ?? [];
     let q = quadrants.find(x => x.arrow === arrow && x.label === lineValue);
     if (q) return { quadrantKey: q.key, lineFilter: null };
     q = quadrants.find(x => x.arrow === arrow && (x.lines ?? []).includes(lineValue));
@@ -1400,8 +1330,8 @@ function saveSchedule() {
     // One-time schedules store a concrete date; repeating schedules compute it dynamically.
     const targetDate = repeatDays.length ? null : resolveTargetDate(targetMinutes);
 
-    const quadrantData = state.quadrantsByKey.get(scheduleModalSelectedQuadrantKey)
-        ?? state.lastData?.quadrants?.find(q => q.key === scheduleModalSelectedQuadrantKey);
+    const quadrantData = quadrantsByKey().get(scheduleModalSelectedQuadrantKey)
+        ?? fetchStatus().data?.quadrants?.find(q => q.key === scheduleModalSelectedQuadrantKey);
     if (!quadrantData) return;
 
     const fields = {
@@ -1476,16 +1406,17 @@ function candidatesForSchedule(schedule, quadrant, nowCalMin) {
  * the window (departs) or the user accepts a switch.
  */
 function evaluateSchedules() {
-    if (!state.lastData || schedules.length === 0) return;
+    if (!fetchStatus().data || schedules.length === 0) return;
 
     const nowCalMin = calendarMinutes(berlinDateString(), berlinNowMinutes());
+    const quadrants = quadrantsByKey();
 
     for (const schedule of schedules) {
-        const quadrant = state.quadrantsByKey.get(schedule.quadrantKey);
+        const quadrant = quadrants.get(schedule.quadrantKey);
         if (!quadrant) {
             if (!warnedMissingQuadrantKeys.has(schedule.quadrantKey)) {
                 warnedMissingQuadrantKeys.add(schedule.quadrantKey);
-                console.warn(`🗓 [eval] no quadrant found for key "${schedule.quadrantKey}" — available: ${[...state.quadrantsByKey.keys()].join(', ')}`);
+                console.warn(`🗓 [eval] no quadrant found for key "${schedule.quadrantKey}" — available: ${[...quadrants.keys()].join(', ')}`);
             }
             continue;
         }

@@ -25,6 +25,7 @@ trainspotter/
 │   └── fetch_stations.py       # Builds vbb_stations.json via VBB /locations/nearby grid sweep
 ├── static/
 │   ├── app.js                  # Main dashboard: geolocation, polling, departure rendering, filter controls
+│   ├── display-state.js        # Display page pure state: fetch status, render planning (tested with node --test)
 │   ├── display.js              # Display page: quadrant rendering, polling, zoom modal, alarm, schedule matcher
 │   ├── styles.css              # BVG/VBB line colours and main dashboard styles
 │   └── display.css             # Display page: Apple Liquid Glass aesthetic, landscape 2×2 grid
