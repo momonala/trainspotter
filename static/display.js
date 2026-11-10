@@ -59,19 +59,21 @@ function quadrantsByKey() {
     return renderedQuadrants(displayFetch.current, lastRender);
 }
 
-// Zoom modal state
-const zoom = {
-    active: false,
-    tripId: null,         // VBB tripId of the zoomed departure; used to rebind on refresh
-    departureTime: null,  // absolute ms — updated from live data when tripId is found
-    alarmArmed: false,    // flips false once alarm fires (threshold: 7 min)
-    autoCloseArmed: false,// flips false once auto-dismiss fires (threshold: 5 min)
-};
+const zoom = createZoomMachine({
+    timers: window,
+    beep: beepOnce,
+    requestClose: () => closeZoom(),
+    onMuteChange: muted => {
+        localStorage.setItem('alarmMuted', muted);
+        syncMuteButton();
+    },
+    onChange: zoomState => {
+        document.getElementById('modal-card')?.classList.toggle('alarming', isZoomAlarming(zoomState));
+    },
+    muted: localStorage.getItem('alarmMuted') === 'true',
+});
 
-let alarmTimerId = null;
-let alarmAutoStopId = null;  // clears the alarm sound after 60 s
 let audioCtx = null;         // shared context — must be created inside a user gesture
-let muted = localStorage.getItem('alarmMuted') === 'true';
 const warnedMissingQuadrantKeys = new Set();
 
 // =============================================================================
@@ -315,19 +317,17 @@ function unlockAudio() {
     if (audioCtx.state === 'suspended') audioCtx.resume();
 }
 
-function toggleMute() {
-    muted = !muted;
-    localStorage.setItem('alarmMuted', muted);
+function syncMuteButton() {
     const btn = document.getElementById('mute-btn');
     if (!btn) return;
+    const { muted } = zoom.state;
     btn.classList.toggle('muted', muted);
     btn.setAttribute('aria-pressed', String(muted));
     btn.setAttribute('aria-label', muted ? 'Unmute alarm' : 'Mute alarm');
-    if (muted) stopAlarm();
 }
 
 function beepOnce() {
-    if (muted || !audioCtx || audioCtx.state !== 'running') return;
+    if (!audioCtx || audioCtx.state !== 'running') return;
     // 6 rapid alternating pulses — harsh square wave, hard to ignore
     [0, 0.15, 0.30, 0.45, 0.60, 0.75].forEach((t, i) => {
         const freq = i % 2 === 0 ? 1320 : 880;
@@ -344,55 +344,27 @@ function beepOnce() {
     });
 }
 
-function playAlarm() {
-    stopAlarm();
-    beepOnce();
-    alarmTimerId = setInterval(beepOnce, 1800);
-    alarmAutoStopId = setTimeout(stopAlarm, 60_000);
-}
-
-function stopAlarm() {
-    if (alarmTimerId !== null) {
-        clearInterval(alarmTimerId);
-        alarmTimerId = null;
-    }
-    if (alarmAutoStopId !== null) {
-        clearTimeout(alarmAutoStopId);
-        alarmAutoStopId = null;
-    }
-}
-
 // =============================================================================
 // Zoom modal
 // =============================================================================
 
 function updateZoomDisplay() {
-    if (!zoom.active) return;
+    if (!isZoomOpen(zoom.state)) return;
 
-    const msLeft = zoom.departureTime - Date.now();
-    const minutes = Math.max(0, Math.floor(msLeft / 60_000));
+    const now = Date.now();
+    const { departureTime } = zoom.state;
+    const minutes = zoomMinutesLeft(departureTime, now);
 
     const minsEl = document.getElementById('modal-minutes');
     const clockEl = document.getElementById('modal-clock');
     if (minsEl) minsEl.textContent = `${minutes}m`;
     if (clockEl) {
-        clockEl.textContent = new Date(zoom.departureTime).toLocaleTimeString('de-DE', {
+        clockEl.textContent = new Date(departureTime).toLocaleTimeString('de-DE', {
             hour: '2-digit', minute: '2-digit',
         });
     }
 
-    // Fire alarm the first time the countdown reaches ≤ 7 min
-    if (zoom.alarmArmed && minutes <= 7) {
-        zoom.alarmArmed = false;
-        document.getElementById('modal-card')?.classList.add('alarming');
-        playAlarm();
-    }
-
-    // Auto-dismiss zoom when the train is ≤ 5 min away (time to move)
-    if (zoom.autoCloseArmed && minutes <= 5) {
-        zoom.autoCloseArmed = false;
-        closeZoom();
-    }
+    zoom.transition({ type: 'tick', now });
 
     syncVbbWarning();
 }
@@ -430,19 +402,17 @@ function findDepartureByTripId(tripId) {
  * Called after each render rebuilds the quadrant index.
  */
 function syncZoomDeparture() {
-    if (!zoom.active || !zoom.tripId) return;
-    const dep = findDepartureByTripId(zoom.tripId);
-    if (!dep) return;
-    zoom.departureTime = departureMs(dep);
+    zoom.transition({
+        type: 'sync',
+        departureTimeOf: tripId => {
+            const dep = findDepartureByTripId(tripId);
+            return dep ? departureMs(dep) : null;
+        },
+    });
 }
 
 function openZoom(dep, arrow) {
     unlockAudio();  // must happen inside tap handler so iOS allows audio
-    zoom.active = true;
-    zoom.tripId = dep.tripId;
-    zoom.departureTime = departureMs(dep);
-    zoom.alarmArmed = dep.minutes > 7;      // arm alarm threshold (7 min)
-    zoom.autoCloseArmed = dep.minutes > 5;  // arm auto-dismiss threshold (5 min)
 
     const arrowEl = document.getElementById('modal-arrow');
     if (arrowEl) arrowEl.textContent = arrow ?? '';
@@ -463,11 +433,12 @@ function openZoom(dep, arrow) {
         card.style.animation = '';
     }
 
-    // Already urgent — enter alarm state immediately instead of waiting for threshold
-    if (dep.minutes <= 7) {
-        card?.classList.add('alarming');
-        playAlarm();
-    }
+    zoom.transition({
+        type: 'open',
+        tripId: dep.tripId,
+        departureTime: departureMs(dep),
+        minutes: dep.minutes,
+    });
 
     updateZoomDisplay();
     syncVbbWarning();
@@ -491,14 +462,7 @@ function closeOverlay(overlayEl, { beforeClose } = {}) {
 
 function closeZoom() {
     closeOverlay(document.getElementById('modal-overlay'), {
-        beforeClose: () => {
-            stopAlarm();
-            zoom.active = false;
-            zoom.tripId = null;
-            zoom.alarmArmed = false;
-            zoom.autoCloseArmed = false;
-            document.getElementById('modal-card')?.classList.remove('alarming');
-        },
+        beforeClose: () => zoom.transition({ type: 'close' }),
     });
 }
 
@@ -760,13 +724,8 @@ window.addEventListener('DOMContentLoaded', () => {
         evaluateSchedules();
     }, DISPLAY_CONFIG.CLOCK_INTERVAL_MS);
 
-    const muteBtn = document.getElementById('mute-btn');
-    if (muteBtn) {
-        muteBtn.classList.toggle('muted', muted);
-        muteBtn.setAttribute('aria-pressed', String(muted));
-        muteBtn.setAttribute('aria-label', muted ? 'Unmute alarm' : 'Mute alarm');
-        muteBtn.addEventListener('click', toggleMute);
-    }
+    syncMuteButton();
+    document.getElementById('mute-btn')?.addEventListener('click', () => zoom.transition({ type: 'toggle-mute' }));
 
     document.getElementById('modal-overlay')?.addEventListener('click', e => {
         if (e.target === e.currentTarget) closeZoom();
@@ -1441,7 +1400,7 @@ function evaluateSchedules() {
         // lock onto the closest train and zoom, exactly like a manual tap.
         if (!locked) {
             // Manual zoom open: don't steal it. Leave activeTripId unset so we lock once it closes.
-            if (zoom.active) continue;
+            if (isZoomOpen(zoom.state)) continue;
             schedule.activeTripId = idealTripId;
             dismissSwitchOffer(schedule.id);
             console.info(`[evaluateSchedules] auto-zoom for "${formatScheduleLabel(schedule)}" → ${idealTripId}`);
