@@ -704,7 +704,6 @@ async function refresh() {
         onError: ({ error }) => showError(error),
     });
     if (!ran) return;
-    // Run after the fetch handlers so schedule errors don't masquerade as fetch failures.
     evaluateSchedules();
 }
 
