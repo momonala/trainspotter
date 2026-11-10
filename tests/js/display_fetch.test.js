@@ -197,8 +197,8 @@ test('planRender derives minutes, drops uncatchable trains and indexes by key', 
     assert.equal(plan.quadrantsByKey.get('north'), plan.quadrants[0]);
 });
 
-test('planRender honours min_departure_min', () => {
-    const data = fakeData({ minDepartureMin: 3 });
+test('planRender keeps a departure exactly at min_departure_min', () => {
+    const data = fakeData({ minDepartureMin: 4 });
     const plan = planRender({ status: 'fresh', data, error: null, updatedAt: NOW }, null, NOW);
     assert.deepEqual(plan.quadrants[0].departures.map(d => d.tripId), ['a', 'b']);
 });
