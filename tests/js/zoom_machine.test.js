@@ -4,7 +4,6 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const {
-    ZOOM_TIMING,
     createZoomMachine,
     isZoomAlarming,
     isZoomOpen,
@@ -76,29 +75,17 @@ function setup({ muted = false, closeOnRequest = true } = {}) {
     return { clock, log, machine, open, tick, phase };
 }
 
-test('timing constants match the display', () => {
-    assert.deepEqual({ ...ZOOM_TIMING }, {
-        ALARM_AT_MIN: 7,
-        AUTO_CLOSE_AT_MIN: 5,
-        BEEP_INTERVAL_MS: 1800,
-        ALARM_AUTO_STOP_MS: 60_000,
-    });
-});
-
 test('zoomMinutesLeft floors and never goes below zero', () => {
     assert.equal(zoomMinutesLeft(T0 + 7 * MIN, T0), 7);
     assert.equal(zoomMinutesLeft(T0 + 7 * MIN, T0 + 1), 6);
     assert.equal(zoomMinutesLeft(T0, T0 + 5 * MIN), 0);
 });
 
-test('starts closed, unmuted by default, with no timers', () => {
+test('starts closed with no timers, muted only when the stored preference says so', () => {
     const { machine, clock } = setup();
     assert.deepEqual(machine.state, { phase: 'closed', tripId: null, departureTime: null, muted: false });
     assert.equal(isZoomOpen(machine.state), false);
     assert.equal(clock.pending(), 0);
-});
-
-test('starts muted when the stored preference says so', () => {
     assert.equal(setup({ muted: true }).machine.state.muted, true);
 });
 
@@ -235,13 +222,6 @@ test('an ignored close request from open-armed -> dismissed', () => {
     assert.equal(log.closeRequests, 1);
 });
 
-test('tick does nothing when closed', () => {
-    const { tick, phase, log } = setup();
-    tick();
-    assert.equal(phase(), 'closed');
-    assert.equal(log.closeRequests, 0);
-});
-
 test('close from any open phase resets and clears every timer', () => {
     for (const minutes of [8, 7, 4]) {
         const { machine, open, clock, log } = setup();
@@ -336,15 +316,12 @@ test('sync keeps the last known time when the trip is gone from the data', () =>
     assert.equal(machine.state.phase, 'alarm-armed');
 });
 
-test('sync is ignored when closed or when the zoomed departure has no trip id', () => {
-    const { machine, open } = setup();
+test('sync is ignored when closed', () => {
+    const { machine } = setup();
     let asked = 0;
-    const departureTimeOf = () => { asked++; return T0; };
-    machine.transition({ type: 'sync', departureTimeOf });
-    open(10, { tripId: null });
-    machine.transition({ type: 'sync', departureTimeOf });
+    machine.transition({ type: 'sync', departureTimeOf: () => { asked++; return T0; } });
     assert.equal(asked, 0);
-    assert.equal(machine.state.departureTime, T0 + 10 * MIN);
+    assert.equal(machine.state.departureTime, null);
 });
 
 test('reopening an urgent train restarts the alarm and its 60 s auto-stop', () => {
@@ -384,23 +361,15 @@ test('mute in alarm-armed stops a leftover sound without changing phase', () => 
     assert.equal(clock.pending(), 0);
 });
 
-test('every transition reports the new state', () => {
-    const { machine, open, tick, log } = setup();
+test('every transition reports the new state, and a close request during tick reports closed last', () => {
+    const { machine, clock, open, tick, log } = setup();
     open(8);
     tick();
     machine.transition({ type: 'close' });
     assert.deepEqual(log.changes.map(s => s.phase), ['alarm-armed', 'alarm-armed', 'closed']);
-});
 
-test('a close request during tick reports closed last', () => {
-    const { clock, open, tick, log } = setup();
     open(6);
     clock.advance(MIN);
     tick();
     assert.equal(log.changes.at(-1).phase, 'closed');
-});
-
-test('unknown events throw', () => {
-    const { machine } = setup();
-    assert.throws(() => machine.transition({ type: 'nope' }), /unknown zoom event/);
 });

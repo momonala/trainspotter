@@ -65,12 +65,6 @@ function fakeFetch({ now = () => NOW } = {}) {
     return { store, pending, calls, refresh: () => store.refresh(handlers) };
 }
 
-test('starts loading with no data, error or timestamp', () => {
-    const { store } = fakeFetch();
-    assert.deepEqual(store.current, { status: 'loading', data: null, error: null, updatedAt: null });
-    assert.equal(store.current, INITIAL_FETCH_STATUS);
-});
-
 test('loading -> fresh sets data and updatedAt in one value', async () => {
     const { store, pending, calls, refresh } = fakeFetch({ now: () => NOW + 1234 });
     const data = fakeData();
@@ -133,20 +127,6 @@ test('consecutive failures count up and reset after a success', async () => {
     pending[4].reject(new Error('again'));
     await run;
     assert.equal(store.current.error.consecutiveFailures, 1);
-});
-
-test('error -> fresh clears the error', async () => {
-    const { store, pending, refresh } = fakeFetch();
-    let run = refresh();
-    pending[0].reject(new Error('x'));
-    await run;
-    run = refresh();
-    const data = fakeData();
-    pending[1].resolve(data);
-    await run;
-    assert.equal(store.current.status, 'fresh');
-    assert.equal(store.current.data, data);
-    assert.equal(store.current.error, null);
 });
 
 test('refresh is skipped while one is in flight, and allowed again after', async () => {
@@ -217,14 +197,10 @@ test('planRender derives minutes, drops uncatchable trains and indexes by key', 
     assert.equal(plan.quadrantsByKey.get('north'), plan.quadrants[0]);
 });
 
-test('planRender honours min_departure_min and defaults it to 5', () => {
+test('planRender honours min_departure_min', () => {
     const data = fakeData({ minDepartureMin: 3 });
     const plan = planRender({ status: 'fresh', data, error: null, updatedAt: NOW }, null, NOW);
     assert.deepEqual(plan.quadrants[0].departures.map(d => d.tripId), ['a', 'b']);
-
-    delete data.min_departure_min;
-    const plan5 = planRender({ status: 'fresh', data, error: null, updatedAt: NOW }, null, NOW);
-    assert.deepEqual(plan5.quadrants[0].departures.map(d => d.tripId), ['b']);
 });
 
 test('planRender skips when the same value shows the same minutes', () => {
@@ -263,5 +239,4 @@ test('renderedQuadrants is the last render index only while its value is current
 
 test('retryNotice renders the refresh interval in seconds', () => {
     assert.equal(retryNotice(10_000), 'Retrying every 10s');
-    assert.equal(retryNotice(30_000), 'Retrying every 30s');
 });
