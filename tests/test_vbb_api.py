@@ -125,7 +125,7 @@ def test_classify_request_exception(exc, expected_kind, expected_status):
 def test_vbb_api_error_to_diagnostics():
     error = VBBAPIError("VBB API error: timed out", kind="timeout")
     assert error.to_diagnostics() == {
-        "vbb_error": "VBB API error: timed out",
+        "vbb_error": "VBB timed out",
         "vbb_error_kind": "timeout",
         "vbb_error_summary": "VBB timed out",
     }

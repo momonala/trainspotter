@@ -138,7 +138,7 @@ def api_display_data():
             jsonify(
                 {
                     "error": error.summary,
-                    "detail": str(error),
+                    "detail": "VBB departures unavailable",
                     "diagnostics": diagnostics,
                 }
             ),
@@ -191,12 +191,12 @@ def api_display_data():
         )
     except Exception as error:
         logger.exception("Failed to fetch display data: %s", error)
-        return make_response(jsonify({"error": "Failed to fetch display data", "detail": str(error)}), 500)
+        return make_response(jsonify({"error": "Failed to fetch display data", "detail": type(error).__name__}), 500)
 
 
 def main():
     logger.info("Starting server at http://localhost:%s", FLASK_PORT)
-    app.run(host="0.0.0.0", port=FLASK_PORT, debug=False)
+    app.run(host="127.0.0.1", port=FLASK_PORT, debug=False)
 
 
 if __name__ == "__main__":

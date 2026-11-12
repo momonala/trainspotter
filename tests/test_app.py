@@ -164,3 +164,4 @@ def test_api_display_data_returns_502_on_vbb_error(mock_get_departures, client):
     assert body["diagnostics"]["station_id"] is not None
     assert body["error"] == "VBB unreachable"
     assert body["diagnostics"]["vbb_error_kind"] == "unknown"
+    assert "downstream unavailable" not in response.get_data(as_text=True)

@@ -55,7 +55,7 @@ class VBBAPIError(Exception):
     def to_diagnostics(self) -> dict:
         """Structured fields for API diagnostics payloads."""
         diagnostics = {
-            "vbb_error": str(self),
+            "vbb_error": self.summary,
             "vbb_error_kind": self.kind,
             "vbb_error_summary": self.summary,
         }
